@@ -11,6 +11,7 @@ const axios = require('axios');
 require('dotenv').config();
 
 const app = express();
+const router = express.Router();
 
 // Configuration
 const GATEWAY_PORT = process.env.GATEWAY_PORT || 8080;
@@ -295,19 +296,15 @@ for (const [serviceName, config] of Object.entries(SERVICES)) {
     return config.publicPaths?.some(publicPath => path.startsWith(publicPath));
   };
 
-  // Proxy middleware with filtering
+  // Create proxy middleware
   const proxy = createProxyMiddleware({
     target: config.target,
     changeOrigin: true,
     pathRewrite: {
       [`^${config.path}`]: ''
     },
-    // Filter function - returns false to skip proxy for public paths
-    filter: (pathname, req) => {
-      // Don't filter - let the middleware below handle auth
-      return true;
-    },
     onProxyReq: (proxyReq, req, res) => {
+      console.log(`[Gateway] Proxying ${serviceName}: ${req.method} ${req.path} -> ${config.target}${req.path}`);
       // Forward tenant context headers
       if (req.headers['x-tenant-id']) {
         proxyReq.setHeader('x-tenant-id', req.headers['x-tenant-id']);
@@ -330,19 +327,25 @@ for (const [serviceName, config] of Object.entries(SERVICES)) {
       }
     },
     onProxyRes: (proxyRes, req, res) => {
-      // Log response
       console.log(`[Gateway] ${serviceName} response: ${proxyRes.statusCode}`);
     }
   });
 
-  // Apply middleware - check if path requires auth before proxying
+  // Apply middleware to app with path checking
   app.use(config.path, (req, res, next) => {
-    // If this is a public path, skip validation and go to proxy
-    if (isPublicPath(req.originalUrl || req.path)) {
-      console.log(`[Gateway] Public path accessed: ${req.originalUrl || req.path}`);
-      return next();
+    const fullPath = req.originalUrl || req.path;
+
+    // Log request
+    console.log(`[Gateway] Request to ${serviceName}: ${fullPath}`);
+
+    // Check if this is a public path
+    if (isPublicPath(fullPath)) {
+      console.log(`[Gateway] Public path - skipping auth: ${fullPath}`);
+      return next('route');  // Skip to next middleware (the proxy)
     }
-    // Otherwise, validate API key
+
+    // Require API key for non-public paths
+    console.log(`[Gateway] Protected path - validating API key: ${fullPath}`);
     return validateApiKey(req, res, next);
   }, proxy);
 }
