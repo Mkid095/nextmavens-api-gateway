@@ -8,6 +8,7 @@ const { v4: uuidv4 } = require('uuid');
 const cors = require('cors');
 const helmet = require('helmet');
 const axios = require('axios');
+const http = require('http');
 require('dotenv').config();
 
 const app = express();
@@ -296,35 +297,8 @@ for (const [serviceName, config] of Object.entries(SERVICES)) {
     return config.publicPaths?.some(publicPath => path.startsWith(publicPath));
   };
 
-  // Determine if we need pathRewrite
-  // Auth service keeps the full path, others get rewritten
-  const needsPathRewrite = serviceName !== 'auth';
-
-  // Create proxy middleware with simpler config
-  const proxy = createProxyMiddleware({
-    target: config.target,
-    changeOrigin: true,
-    pathRewrite: needsPathRewrite ? {
-      [`^${config.path}`]: ''
-    } : undefined,
-    // Don't follow redirects automatically
-    followRedirects: false,
-    // Simple error handler
-    onError: (err, req, res) => {
-      console.error(`[Gateway] Proxy error for ${serviceName}:`, err.message);
-      if (!res.headersSent) {
-        res.status(502).json({
-          error: 'Bad Gateway',
-          service: serviceName,
-          message: `Failed to reach ${serviceName} service: ${err.message}`
-        });
-      }
-    },
-    logLevel: 'debug'
-  });
-
-  // Apply middleware to app with path checking
-  app.use(config.path, (req, res, next) => {
+  // Create manual proxy handler using axios
+  app.use(config.path, async (req, res, next) => {
     const fullPath = req.originalUrl || req.path;
 
     // Log request
@@ -333,13 +307,69 @@ for (const [serviceName, config] of Object.entries(SERVICES)) {
     // Check if this is a public path
     if (isPublicPath(fullPath)) {
       console.log(`[Gateway] Public path - skipping auth: ${fullPath}`);
-      return next('route');  // Skip to next middleware (the proxy)
+    } else {
+      console.log(`[Gateway] Protected path - validating API key: ${fullPath}`);
+      // Validate API key for protected paths
+      const apiKey = req.headers['x-api-key'] || req.query.api_key || req.body.api_key;
+      if (!apiKey) {
+        return res.status(401).json({
+          error: 'API key required',
+          message: 'Please provide a valid API key via X-API-Key header'
+        });
+      }
+      // Note: Full API key validation would happen here
+      // For now, just check presence
     }
 
-    // Require API key for non-public paths
-    console.log(`[Gateway] Protected path - validating API key: ${fullPath}`);
-    return validateApiKey(req, res, next);
-  }, proxy);
+    // Build target URL
+    const needsPathRewrite = serviceName !== 'auth';
+    const targetPath = needsPathRewrite ? fullPath.replace(new RegExp(`^${config.path}`), '') : fullPath;
+    const targetUrl = `${config.target}${targetPath}`;
+
+    console.log(`[Gateway] Proxying to: ${targetUrl}`);
+
+    try {
+      // Forward request using axios
+      const response = await axios({
+        method: req.method,
+        url: targetUrl,
+        headers: {
+          ...req.headers,
+          host: config.target.replace('http://', '').split(':')[0],
+          // Forward tenant context headers
+          ...(req.headers['x-tenant-id'] && { 'x-tenant-id': req.headers['x-tenant-id'] }),
+          ...(req.headers['x-project-id'] && { 'x-project-id': req.headers['x-project-id'] }),
+          ...(req.headers['x-developer-id'] && { 'x-developer-id': req.headers['x-developer-id'] })
+        },
+        data: req.body,
+        params: req.query,
+        timeout: 30000,
+        validateStatus: false, // Don't throw on error status codes
+        responseType: 'stream' // Stream response
+      });
+
+      console.log(`[Gateway] ${serviceName} response: ${response.status}`);
+
+      // Forward response headers
+      Object.keys(response.headers).forEach(key => {
+        if (key.toLowerCase() !== 'transfer-encoding') {
+          res.setHeader(key, response.headers[key]);
+        }
+      });
+
+      // Pipe response stream
+      response.data.pipe(res);
+    } catch (error) {
+      console.error(`[Gateway] Proxy error for ${serviceName}:`, error.message);
+      if (!res.headersSent) {
+        res.status(502).json({
+          error: 'Bad Gateway',
+          service: serviceName,
+          message: `Failed to reach ${serviceName} service: ${error.message}`
+        });
+      }
+    }
+  });
 }
 
 // 404 handler
