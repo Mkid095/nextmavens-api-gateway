@@ -295,12 +295,17 @@ for (const [serviceName, config] of Object.entries(SERVICES)) {
     return config.publicPaths?.some(publicPath => path.startsWith(publicPath));
   };
 
-  // Proxy middleware
+  // Proxy middleware with filtering
   const proxy = createProxyMiddleware({
     target: config.target,
     changeOrigin: true,
     pathRewrite: {
       [`^${config.path}`]: ''
+    },
+    // Filter function - returns false to skip proxy for public paths
+    filter: (pathname, req) => {
+      // Don't filter - let the middleware below handle auth
+      return true;
     },
     onProxyReq: (proxyReq, req, res) => {
       // Forward tenant context headers
@@ -316,24 +321,30 @@ for (const [serviceName, config] of Object.entries(SERVICES)) {
     },
     onError: (err, req, res) => {
       console.error(`[Gateway] Proxy error for ${serviceName}:`, err.message);
-      res.status(502).json({
-        error: 'Bad Gateway',
-        service: serviceName,
-        message: `Failed to reach ${serviceName} service`
-      });
+      if (!res.headersSent) {
+        res.status(502).json({
+          error: 'Bad Gateway',
+          service: serviceName,
+          message: `Failed to reach ${serviceName} service`
+        });
+      }
+    },
+    onProxyRes: (proxyRes, req, res) => {
+      // Log response
+      console.log(`[Gateway] ${serviceName} response: ${proxyRes.statusCode}`);
     }
   });
 
   // Apply middleware - check if path requires auth before proxying
   app.use(config.path, (req, res, next) => {
-    // If this is a public path, skip validation
+    // If this is a public path, skip validation and go to proxy
     if (isPublicPath(req.originalUrl || req.path)) {
       console.log(`[Gateway] Public path accessed: ${req.originalUrl || req.path}`);
-      return proxy(req, res, next);
+      return next();
     }
     // Otherwise, validate API key
-    return validateApiKey(req, res, () => proxy(req, res, next));
-  });
+    return validateApiKey(req, res, next);
+  }, proxy);
 }
 
 // 404 handler
