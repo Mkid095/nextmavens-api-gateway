@@ -324,17 +324,16 @@ for (const [serviceName, config] of Object.entries(SERVICES)) {
     }
   });
 
-  // Apply middleware and proxy
-  if (config.requiresAuth && !config.publicPaths) {
-    app.use(config.path, validateApiKey, proxy);
-  } else {
-    app.use(config.path, (req, res, next) => {
-      if (!isPublicPath(req.path)) {
-        return validateApiKey(req, res, next);
-      }
-      next();
-    }, proxy);
-  }
+  // Apply middleware - check if path requires auth before proxying
+  app.use(config.path, (req, res, next) => {
+    // If this is a public path, skip validation
+    if (isPublicPath(req.originalUrl || req.path)) {
+      console.log(`[Gateway] Public path accessed: ${req.originalUrl || req.path}`);
+      return proxy(req, res, next);
+    }
+    // Otherwise, validate API key
+    return validateApiKey(req, res, () => proxy(req, res, next));
+  });
 }
 
 // 404 handler
