@@ -40,28 +40,28 @@ const rateLimiter = new RateLimiterRedis({
 // Service endpoints configuration
 const SERVICES = {
   auth: {
-    target: 'http://localhost:4000',
+    target: 'http://auth-service:4000',
     path: '/api/auth',
     publicPaths: ['/api/auth/signup', '/api/auth/login', '/api/auth/forgot-password']
   },
   rest: {
-    target: 'http://localhost:3001',
+    target: 'http://nextmavens-postgrestapi-srrfw0-postgrest-1:3000',
     path: '/api',
     requiresAuth: true
   },
   graphql: {
-    target: 'http://localhost:4004',
+    target: 'http://nextmavens-graphql:4004',
     path: '/graphql',
     requiresAuth: true
   },
   realtime: {
-    target: 'http://localhost:4003',
+    target: 'http://nextmavens-realtime:4003',
     path: '/realtime',
     requiresAuth: true,
     isWebSocket: true
   },
   storage: {
-    target: 'http://localhost:4005',
+    target: 'http://nextmavens-telegram-storage:4005',
     path: '/api/storage',
     requiresAuth: true
   },
