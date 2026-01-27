@@ -7,6 +7,7 @@ const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
 const cors = require('cors');
 const helmet = require('helmet');
+const axios = require('axios');
 require('dotenv').config();
 
 const app = express();
