@@ -296,15 +296,20 @@ for (const [serviceName, config] of Object.entries(SERVICES)) {
     return config.publicPaths?.some(publicPath => path.startsWith(publicPath));
   };
 
+  // Determine if we need pathRewrite
+  // Auth service keeps the full path, others get rewritten
+  const needsPathRewrite = serviceName !== 'auth';
+
   // Create proxy middleware
   const proxy = createProxyMiddleware({
     target: config.target,
     changeOrigin: true,
-    pathRewrite: {
+    pathRewrite: needsPathRewrite ? {
       [`^${config.path}`]: ''
-    },
+    } : undefined,
     onProxyReq: (proxyReq, req, res) => {
-      console.log(`[Gateway] Proxying ${serviceName}: ${req.method} ${req.path} -> ${config.target}${req.path}`);
+      const targetPath = needsPathRewrite ? req.path.replace(new RegExp(`^${config.path}`), '') : req.path;
+      console.log(`[Gateway] Proxying ${serviceName}: ${req.method} ${req.path} -> ${config.target}${targetPath}`);
       // Forward tenant context headers
       if (req.headers['x-tenant-id']) {
         proxyReq.setHeader('x-tenant-id', req.headers['x-tenant-id']);
