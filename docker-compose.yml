@@ -1,0 +1,24 @@
+services:
+  api-gateway:
+    build: .
+    container_name: nextmavens-api-gateway
+    environment:
+      - GATEWAY_PORT=8080
+      - DATABASE_URL=postgresql://nextmavens:Elishiba@95@nextmavens-db-m4sxnf.1.mvuvh68efk7jnvynmv8r2jm2u:5432/nextmavens
+      - REDIS_URL=redis://dokploy-redis.1.ks3fo0zmfke2ukrda88lf6jb0:6379
+      - JWT_SECRET=nextmavens-gateway-secret-key-2024
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+    networks:
+      - dokploy-network
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.api-gateway.rule=Host(`gateway.nextmavens.cloud`) || Host(`api.nextmavens.cloud`)
+      - traefik.http.routers.api-gateway.entrypoints=websecure
+      - traefik.http.routers.api-gateway.tls.certresolver=letsencrypt
+      - traefik.http.services.api-gateway.loadbalancer.server.port=8080
+
+networks:
+  dokploy-network:
+    external: true

@@ -1,0 +1,22 @@
+{
+  "name": "nextmavens-api-gateway",
+  "version": "1.0.0",
+  "description": "API Gateway - Supervisor layer for NextMavens platform with API key validation, rate limiting, and routing",
+  "main": "gateway.js",
+  "scripts": {
+    "start": "node gateway.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "http-proxy-middleware": "^2.0.6",
+    "redis": "^4.6.11",
+    "pg": "^8.11.3",
+    "dotenv": "^16.3.1",
+    "cors": "^2.8.5",
+    "helmet": "^7.1.0",
+    "express-rate-limit": "^7.1.5",
+    "jsonwebtoken": "^9.0.2",
+    "uuid": "^9.0.1",
+    "axios": "^1.6.2"
+  }
+}
