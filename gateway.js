@@ -300,40 +300,27 @@ for (const [serviceName, config] of Object.entries(SERVICES)) {
   // Auth service keeps the full path, others get rewritten
   const needsPathRewrite = serviceName !== 'auth';
 
-  // Create proxy middleware
+  // Create proxy middleware with simpler config
   const proxy = createProxyMiddleware({
     target: config.target,
     changeOrigin: true,
     pathRewrite: needsPathRewrite ? {
       [`^${config.path}`]: ''
     } : undefined,
-    onProxyReq: (proxyReq, req, res) => {
-      const targetPath = needsPathRewrite ? req.path.replace(new RegExp(`^${config.path}`), '') : req.path;
-      console.log(`[Gateway] Proxying ${serviceName}: ${req.method} ${req.path} -> ${config.target}${targetPath}`);
-      // Forward tenant context headers
-      if (req.headers['x-tenant-id']) {
-        proxyReq.setHeader('x-tenant-id', req.headers['x-tenant-id']);
-      }
-      if (req.headers['x-project-id']) {
-        proxyReq.setHeader('x-project-id', req.headers['x-project-id']);
-      }
-      if (req.headers['x-developer-id']) {
-        proxyReq.setHeader('x-developer-id', req.headers['x-developer-id']);
-      }
-    },
+    // Don't follow redirects automatically
+    followRedirects: false,
+    // Simple error handler
     onError: (err, req, res) => {
       console.error(`[Gateway] Proxy error for ${serviceName}:`, err.message);
       if (!res.headersSent) {
         res.status(502).json({
           error: 'Bad Gateway',
           service: serviceName,
-          message: `Failed to reach ${serviceName} service`
+          message: `Failed to reach ${serviceName} service: ${err.message}`
         });
       }
     },
-    onProxyRes: (proxyRes, req, res) => {
-      console.log(`[Gateway] ${serviceName} response: ${proxyRes.statusCode}`);
-    }
+    logLevel: 'debug'
   });
 
   // Apply middleware to app with path checking
@@ -341,7 +328,7 @@ for (const [serviceName, config] of Object.entries(SERVICES)) {
     const fullPath = req.originalUrl || req.path;
 
     // Log request
-    console.log(`[Gateway] Request to ${serviceName}: ${fullPath}`);
+    console.log(`[Gateway] Request to ${serviceName}: ${req.method} ${fullPath}`);
 
     // Check if this is a public path
     if (isPublicPath(fullPath)) {
