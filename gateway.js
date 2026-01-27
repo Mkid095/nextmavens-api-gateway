@@ -318,7 +318,8 @@ for (const [serviceName, config] of Object.entries(SERVICES)) {
         });
       }
       // Note: Full API key validation would happen here
-      // For now, just check presence
+      // For now, just check presence and log the API key prefix
+      console.log(`[Gateway] API key provided: ${apiKey.substring(0, 20)}...`);
     }
 
     // Build target URL
@@ -329,13 +330,12 @@ for (const [serviceName, config] of Object.entries(SERVICES)) {
     console.log(`[Gateway] Proxying to: ${targetUrl}`);
 
     try {
-      // Forward request using axios
+      // Forward request using axios (without streaming)
       const response = await axios({
         method: req.method,
         url: targetUrl,
         headers: {
-          ...req.headers,
-          host: config.target.replace('http://', '').split(':')[0],
+          'Content-Type': req.headers['content-type'] || 'application/json',
           // Forward tenant context headers
           ...(req.headers['x-tenant-id'] && { 'x-tenant-id': req.headers['x-tenant-id'] }),
           ...(req.headers['x-project-id'] && { 'x-project-id': req.headers['x-project-id'] }),
@@ -345,22 +345,37 @@ for (const [serviceName, config] of Object.entries(SERVICES)) {
         params: req.query,
         timeout: 30000,
         validateStatus: false, // Don't throw on error status codes
-        responseType: 'stream' // Stream response
+        maxBodyLength: Infinity,
+        maxContentLength: Infinity
       });
 
       console.log(`[Gateway] ${serviceName} response: ${response.status}`);
 
       // Forward response headers
       Object.keys(response.headers).forEach(key => {
-        if (key.toLowerCase() !== 'transfer-encoding') {
+        if (['content-length', 'content-encoding', 'transfer-encoding'].includes(key.toLowerCase())) {
+          return; // Skip these headers
+        }
+        try {
           res.setHeader(key, response.headers[key]);
+        } catch (e) {
+          // Skip headers that can't be set
         }
       });
 
-      // Pipe response stream
-      response.data.pipe(res);
+      // Send response
+      res.status(response.status).send(response.data);
     } catch (error) {
       console.error(`[Gateway] Proxy error for ${serviceName}:`, error.message);
+
+      if (error.code === 'ECONNREFUSED') {
+        return res.status(503).json({
+          error: 'Service Unavailable',
+          service: serviceName,
+          message: `${serviceName} service is not running`
+        });
+      }
+
       if (!res.headersSent) {
         res.status(502).json({
           error: 'Bad Gateway',
