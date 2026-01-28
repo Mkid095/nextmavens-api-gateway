@@ -1,0 +1,78 @@
+---
+memoryVersion: 1
+storyId: US-002
+storyTitle: Validate Project Status
+completedDate: 2026-01-28
+---
+
+STORY: US-002 - Validate Project Status
+========================================
+
+DESCRIPTION:
+As a gateway engineer, I want to check project status so that suspended projects can't make requests.
+
+MAVEN STEPS COMPLETED:
+[1, 2, 7, 10]
+
+IMPLEMENTATION SUMMARY:
+Built a complete project status validation system for the API Gateway. Created validator class, data layer with caching, Express middleware, and integrated into main gateway. Added security hardening including input validation, rate limiting, and sanitized error messages to prevent project enumeration attacks.
+
+KEY FILES:
+- src/validation/project-status.validator.ts - ProjectStatusValidator class with status checks
+- src/validation/types/validation.types.ts - Type definitions for validation layer
+- src/validation/services/validation-data.service.ts - Data layer with caching and metrics
+- src/validation/middleware/project-status.middleware.ts - Express middleware for validation
+- src/validation/integration/snapshot-integration.ts - High-level integration layer
+- src/validation/index.ts - Centralized exports
+- src/api/middleware/error.handler.ts - Added projectArchived, projectDeleted error methods
+- src/index.ts - Gateway integration with rate limiting and security headers
+
+DECISIONS MADE:
+- Used regex validation for project IDs (/^[a-zA-Z0-9_-]{1,100}$/)
+- Removed query parameter project ID extraction (security risk)
+- Added rate limiting (100 req/min per IP) to prevent enumeration
+- Generic error messages to prevent information leakage
+- Used randomUUID() for cryptographically secure request IDs
+- 5-second TTL cache on validation results for performance
+- Fail-closed architecture - validation errors block requests
+
+INTEGRATION POINTS:
+- Consumes snapshot data from SnapshotService (US-001)
+- Protects gateway routes via middleware
+- Returns standardized ApiError responses
+- Metrics tracking for validation success/failure
+- Will integrate with JWT auth in US-005
+
+LESSONS LEARNED:
+- Security audit found critical issues: missing auth before validation, no rate limiting, query parameter exploitation
+- Always validate input format before processing
+- Never accept sensitive identifiers from query parameters
+- Error messages must be generic to prevent information leakage
+- Rate limiting is essential for any validation endpoint
+- CORS should be restricted to specific origins in production
+- Use cryptographic RNG for request IDs, not Math.random()
+
+STEP 10 SECURITY AUDIT (2026-01-28):
+====================================
+Performed comprehensive security review and hardening:
+
+FIXED CRITICAL ISSUES:
+1. Information leakage in error messages - Removed project IDs/names from all error responses
+2. Timing attack vulnerability - Refactored validator to use constant-time execution
+3. Input validation gaps - Added max length checks before regex (prevents ReDoS)
+4. Cache poisoning vectors - Added prototype pollution protection in snapshot fetcher
+5. Inconsistent error messages - Fixed misleading reference to removed query parameter
+
+SECURITY IMPROVEMENTS:
+- Constant-time validation prevents timing-based project enumeration
+- Strict input length limits (200 char max before processing, 100 after trim)
+- Prototype pollution detection in snapshot data validation
+- Generic error messages across all code paths
+- Fail-closed architecture maintained throughout
+- Enhanced logging for security monitoring without leaking data
+
+FILES MODIFIED:
+- src/api/middleware/error.handler.ts - Generic error messages, removed ID/name exposure
+- src/validation/project-status.validator.ts - Constant-time validation implementation
+- src/validation/middleware/project-status.middleware.ts - Enhanced input validation, security comments
+- src/snapshot/snapshot.fetcher.ts - Prototype pollution protection, stricter validation

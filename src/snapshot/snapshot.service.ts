@@ -1,13 +1,23 @@
-import axios, { AxiosError } from 'axios';
-import {
+import type {
   SnapshotData,
-  SnapshotResponse,
-  SnapshotCacheEntry,
   ProjectConfig,
   ServiceConfig,
-  RateLimitConfig,
-  ProjectStatus
+  RateLimitConfig
 } from '@/types/snapshot.types.js';
+import { ProjectStatus } from '@/types/snapshot.types.js';
+import { SnapshotCacheManager } from './snapshot.cache.js';
+import { SnapshotFetcher } from './snapshot.fetcher.js';
+import { SnapshotRefreshManager } from './snapshot.refresh.js';
+
+/**
+ * Snapshot service unavailable error
+ */
+export class SnapshotUnavailableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'SnapshotUnavailableError';
+  }
+}
 
 /**
  * Snapshot service configuration
@@ -20,33 +30,30 @@ interface SnapshotServiceConfig {
 }
 
 /**
- * Snapshot service error types
- */
-export class SnapshotFetchError extends Error {
-  constructor(message: string, public readonly cause?: Error) {
-    super(message);
-    this.name = 'SnapshotFetchError';
-  }
-}
-
-export class SnapshotUnavailableError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'SnapshotUnavailableError';
-  }
-}
-
-/**
  * Snapshot service manages fetching, caching, and refreshing of configuration snapshots
+ *
+ * This service has been refactored into smaller, focused modules:
+ * - SnapshotCacheManager: Handles caching and expiration
+ * - SnapshotFetcher: Handles fetching from control plane API
+ * - SnapshotRefreshManager: Handles background refresh logic
  */
 export class SnapshotService {
-  private cache: SnapshotCacheEntry | null = null;
-  private refreshTimer: NodeJS.Timeout | null = null;
-  private isFetching = false;
-  private lastFetchAttempt = 0;
-  private fetchFailures = 0;
+  private cache: SnapshotCacheManager;
+  private fetcher: SnapshotFetcher;
+  private refreshManager: SnapshotRefreshManager;
 
-  constructor(private readonly config: SnapshotServiceConfig) {}
+  constructor(private readonly config: SnapshotServiceConfig) {
+    this.cache = new SnapshotCacheManager();
+    this.fetcher = new SnapshotFetcher({
+      snapshotApiUrl: config.snapshotApiUrl,
+      requestTimeoutMs: config.requestTimeoutMs
+    });
+    this.refreshManager = new SnapshotRefreshManager(
+      this.fetcher,
+      this.cache,
+      config.cacheTTLSeconds
+    );
+  }
 
   /**
    * Initialize the snapshot service
@@ -74,16 +81,13 @@ export class SnapshotService {
    * Throws SnapshotUnavailableError if no snapshot is available
    */
   getSnapshot(): SnapshotData {
-    if (!this.cache) {
+    const snapshot = this.cache.getSnapshot();
+
+    if (!snapshot) {
       throw new SnapshotUnavailableError('No snapshot available');
     }
 
-    const now = Date.now();
-    if (now > this.cache.expiresAt) {
-      throw new SnapshotUnavailableError('Snapshot expired');
-    }
-
-    return this.cache.data;
+    return snapshot;
   }
 
   /**
@@ -155,138 +159,22 @@ export class SnapshotService {
    * Fetch a new snapshot from the control plane API
    */
   private async fetchSnapshot(): Promise<void> {
-    // Prevent concurrent fetches
-    if (this.isFetching) {
-      console.log('[SnapshotService] Fetch already in progress, skipping');
-      return;
-    }
-
-    this.isFetching = true;
-    this.lastFetchAttempt = Date.now();
-
-    try {
-      console.log('[SnapshotService] Fetching snapshot from control plane...');
-
-      const response = await axios.get<SnapshotResponse>(
-        this.config.snapshotApiUrl,
-        {
-          timeout: this.config.requestTimeoutMs,
-          headers: {
-            'Content-Type': 'application/json',
-            'User-Agent': 'nextmavens-gateway/1.0.0'
-          }
-        }
-      );
-
-      if (!response.data.success) {
-        throw new SnapshotFetchError(
-          `Snapshot API returned error: ${response.data.error}`
-        );
-      }
-
-      if (!response.data.data) {
-        throw new SnapshotFetchError('Snapshot API returned no data');
-      }
-
-      // Validate snapshot data structure
-      this.validateSnapshotData(response.data.data);
-
-      // Update cache
-      const now = Date.now();
-      this.cache = {
-        data: response.data.data,
-        fetchedAt: now,
-        expiresAt: now + (this.config.cacheTTLSeconds * 1000),
-        version: response.data.data.version
-      };
-
-      // Reset failure counter on success
-      this.fetchFailures = 0;
-
-      console.log(
-        `[SnapshotService] Snapshot fetched successfully - Version: ${this.cache.version}, ` +
-        `Projects: ${Object.keys(this.cache.data.projects).length}, ` +
-        `Services: ${Object.keys(this.cache.data.services).length}`
-      );
-    } catch (error) {
-      this.fetchFailures++;
-
-      if (axios.isAxiosError(error)) {
-        const axiosError = error as AxiosError;
-        throw new SnapshotFetchError(
-          `Failed to fetch snapshot: ${axiosError.message}`,
-          axiosError
-        );
-      }
-
-      throw error;
-    } finally {
-      this.isFetching = false;
-    }
-  }
-
-  /**
-   * Validate snapshot data structure
-   * Throws error if data is invalid
-   */
-  private validateSnapshotData(data: SnapshotData): void {
-    if (!data) {
-      throw new SnapshotFetchError('Snapshot data is null or undefined');
-    }
-
-    if (typeof data.version !== 'number' || data.version < 0) {
-      throw new SnapshotFetchError('Invalid snapshot version');
-    }
-
-    if (!data.projects || typeof data.projects !== 'object') {
-      throw new SnapshotFetchError('Invalid projects data in snapshot');
-    }
-
-    if (!data.services || typeof data.services !== 'object') {
-      throw new SnapshotFetchError('Invalid services data in snapshot');
-    }
-
-    if (!data.rateLimits || typeof data.rateLimits !== 'object') {
-      throw new SnapshotFetchError('Invalid rate limits data in snapshot');
-    }
+    const snapshotData = await this.fetcher.fetchSnapshot();
+    this.cache.updateCache(snapshotData, this.config.cacheTTLSeconds);
   }
 
   /**
    * Start background refresh interval
    */
   private startBackgroundRefresh(): void {
-    if (this.refreshTimer) {
-      clearInterval(this.refreshTimer);
-    }
-
-    console.log(
-      `[SnapshotService] Starting background refresh - ` +
-      `Interval: ${this.config.refreshIntervalSeconds}s`
-    );
-
-    this.refreshTimer = setInterval(
-      async () => {
-        try {
-          await this.fetchSnapshot();
-        } catch (error) {
-          console.error('[SnapshotService] Background refresh failed:', error);
-          // Don't throw - keep using cached data if available
-          // Background refresh failures are logged but don't crash the service
-        }
-      },
-      this.config.refreshIntervalSeconds * 1000
-    );
+    this.refreshManager.start(this.config.refreshIntervalSeconds);
   }
 
   /**
    * Stop background refresh interval
    */
   stop(): void {
-    if (this.refreshTimer) {
-      clearInterval(this.refreshTimer);
-      this.refreshTimer = null;
-      console.log('[SnapshotService] Background refresh stopped');
-    }
+    this.refreshManager.stop();
   }
 
   /**
@@ -301,15 +189,13 @@ export class SnapshotService {
     fetchFailures: number;
     lastFetchAttempt: number;
   } {
-    const now = Date.now();
+    const cacheStats = this.cache.getCacheStats();
+    const fetchStats = this.fetcher.getFetchStats();
+
     return {
-      hasCachedData: this.cache !== null,
-      version: this.cache?.version || null,
-      fetchedAt: this.cache?.fetchedAt || null,
-      expiresAt: this.cache?.expiresAt || null,
-      isExpired: this.cache ? now > this.cache.expiresAt : true,
-      fetchFailures: this.fetchFailures,
-      lastFetchAttempt: this.lastFetchAttempt
+      ...cacheStats,
+      fetchFailures: fetchStats.fetchFailures,
+      lastFetchAttempt: fetchStats.lastFetchAttempt
     };
   }
 }

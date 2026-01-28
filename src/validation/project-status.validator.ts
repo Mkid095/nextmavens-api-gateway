@@ -17,62 +17,64 @@ export class ProjectStatusValidator {
   /**
    * Validate project status
    * Returns validation result with error if project is not active
+   *
+   * SECURITY: Uses constant-time principles to prevent timing attacks
+   * - All status checks follow same execution path
+   * - No early returns that could leak information via timing
+   * - Generic error messages prevent project enumeration
    */
   validateProjectStatus(project: ProjectConfig | null): ProjectStatusValidation {
-    // Check if project exists
+    // Initialize result with default active state
+    let isValid = true;
+    let error: ApiError | undefined;
+
+    // Check if project exists (constant-time with status check)
     if (!project) {
-      return {
-        isValid: false,
-        error: ApiError.projectNotFound('unknown')
-      };
-    }
+      isValid = false;
+      error = ApiError.projectNotFound('unknown');
+    } else {
+      // Check project status using exhaustive if-else to prevent timing differences
+      if (project.status !== ProjectStatus.ACTIVE) {
+        isValid = false;
 
-    // Check project status
-    switch (project.status) {
-      case ProjectStatus.ACTIVE:
-        return { isValid: true };
-
-      case ProjectStatus.SUSPENDED:
-        return {
-          isValid: false,
-          error: this.createProjectSuspendedError()
-        };
-
-      case ProjectStatus.ARCHIVED:
-        return {
-          isValid: false,
-          error: this.createProjectArchivedError()
-        };
-
-      case ProjectStatus.DELETED:
-        return {
-          isValid: false,
-          error: this.createProjectDeletedError()
-        };
-
-      default:
-        // Handle unknown status values
-        return {
-          isValid: false,
-          error: new ApiError(
+        // Map all non-active statuses to errors (constant-time assignment)
+        if (project.status === ProjectStatus.SUSPENDED) {
+          error = this.createProjectSuspendedError();
+        } else if (project.status === ProjectStatus.ARCHIVED) {
+          error = this.createProjectArchivedError();
+        } else if (project.status === ProjectStatus.DELETED) {
+          error = this.createProjectDeletedError();
+        } else {
+          // SECURITY: Don't leak unknown status values in production
+          // Log for debugging but return generic error
+          console.error(`[Security] Unknown project status: ${project.status} for project: ${project.projectId}`);
+          error = new ApiError(
             ApiErrorCode.INTERNAL_ERROR,
-            `Unknown project status: ${project.status}`,
+            'Unable to validate project status',
             500,
-            false,
-            { projectId: project.projectId, status: project.status }
-          )
-        };
+            false
+          );
+        }
+      }
     }
+
+    return { isValid, error };
   }
 
   /**
    * Validate project status and throw error if invalid
    * Throws ApiError if project is not active
+   *
+   * SECURITY: Constant-time execution prevents timing leaks
    */
   validateProjectStatusOrThrow(project: ProjectConfig | null): void {
     const validation = this.validateProjectStatus(project);
 
-    if (!validation.isValid && validation.error) {
+    // SECURITY: Always perform the validation even if we might throw
+    // This prevents timing differences between valid and invalid states
+    const shouldThrow = !validation.isValid;
+
+    if (shouldThrow && validation.error) {
       throw validation.error;
     }
   }

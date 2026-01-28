@@ -75,11 +75,12 @@ export class ApiError extends Error {
 
   /**
    * Create a project not found error
+   * SECURITY: Generic message to prevent project enumeration
    */
-  static projectNotFound(projectId: string): ApiError {
+  static projectNotFound(_projectId: string): ApiError {
     return new ApiError(
       ApiErrorCode.PROJECT_NOT_FOUND,
-      `Project '${projectId}' not found`,
+      'Project not found or access denied',
       404,
       false
     );
@@ -87,11 +88,12 @@ export class ApiError extends Error {
 
   /**
    * Create a project suspended error
+   * SECURITY: Generic message to prevent information leakage
    */
-  static projectSuspended(projectName: string): ApiError {
+  static projectSuspended(_projectName: string): ApiError {
     return new ApiError(
       ApiErrorCode.PROJECT_SUSPENDED,
-      `Project '${projectName}' is suspended. Please contact support.`,
+      'Project is suspended. Please contact support to resolve any outstanding issues.',
       403,
       false
     );
@@ -99,11 +101,12 @@ export class ApiError extends Error {
 
   /**
    * Create a project archived error
+   * SECURITY: Generic message to prevent information leakage
    */
-  static projectArchived(projectName: string): ApiError {
+  static projectArchived(_projectName: string): ApiError {
     return new ApiError(
       ApiErrorCode.PROJECT_ARCHIVED,
-      `Project '${projectName}' is archived and cannot accept requests. Please contact support if you need to reactivate this project.`,
+      'Project is archived and cannot accept requests. Please contact support if you need to reactivate this project.',
       403,
       false
     );
@@ -111,11 +114,12 @@ export class ApiError extends Error {
 
   /**
    * Create a project deleted error
+   * SECURITY: Generic message to prevent information leakage
    */
-  static projectDeleted(projectId: string): ApiError {
+  static projectDeleted(_projectId: string): ApiError {
     return new ApiError(
       ApiErrorCode.PROJECT_DELETED,
-      `Project '${projectId}' has been deleted and is no longer available.`,
+      'Project has been deleted and is no longer available.',
       403,
       false
     );
