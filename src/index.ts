@@ -1,8 +1,8 @@
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
-import { createSnapshotService, getSnapshotService } from './snapshot/snapshot.service.js';
-import { checkSnapshotHealth } from './snapshot/snapshot.middleware.js';
+import { createSnapshotService, getSnapshotService } from '@/snapshot/snapshot.service.js';
+import { checkSnapshotHealth } from '@/snapshot/snapshot.middleware.js';
 
 const app = express();
 const GATEWAY_PORT = parseInt(process.env.GATEWAY_PORT || '8080', 10);

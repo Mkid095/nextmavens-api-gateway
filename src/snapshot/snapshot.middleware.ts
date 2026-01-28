@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
-import { getSnapshotService, SnapshotUnavailableError } from './snapshot.service.js';
-import { ProjectStatus } from '../types/snapshot.types.js';
+import { getSnapshotService, SnapshotUnavailableError } from '@/snapshot/snapshot.service.js';
+import { ProjectStatus } from '@/types/snapshot.types.js';
 
 /**
  * Extend Express Request to include snapshot data

@@ -7,7 +7,7 @@ import {
   ServiceConfig,
   RateLimitConfig,
   ProjectStatus
-} from '../types/snapshot.types.js';
+} from '@/types/snapshot.types.js';
 
 /**
  * Snapshot service configuration
