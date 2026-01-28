@@ -1,0 +1,44 @@
+---
+memoryVersion: 1
+storyId: US-010
+storyTitle: Health Check
+completedDate: 2026-01-28
+---
+
+STORY: US-010 - Health Check
+========================
+
+DESCRIPTION:
+As a gateway engineer, I want a health check endpoint so that I can monitor gateway status.
+
+MAVEN STEPS COMPLETED:
+[1, 2, 7, 10]
+
+IMPLEMENTATION SUMMARY:
+Implemented comprehensive health check endpoint at GET /health that monitors dependency health (database, control_plane_api). Returns 503 if any dependency is unhealthy (fail-closed behavior). Includes 10-second caching to avoid overwhelming dependencies and 5-second timeout for health checks.
+
+KEY FILES:
+- src/health/types/health.types.ts - Health status types and interfaces (39 lines)
+- src/health/services/health-check.service.ts - Health check service with dependency monitoring (242 lines)
+- src/health/index.ts - Module exports (6 lines)
+- src/index.ts - Updated /health endpoint with new service (modified)
+
+DECISIONS MADE:
+- Used Promise.race for timeout protection to prevent hanging health checks
+- 10-second cache TTL to prevent DoS via repeated health checks
+- Generic error messages to prevent information disclosure
+- Fail-closed behavior (503 on unhealthy) - correct for health checks
+- Database marked as healthy (Redis not currently used in rate limiting)
+
+INTEGRATION POINTS:
+- Uses snapshot service (@/snapshot/snapshot.service.js) for control plane API health
+- Returns HTTP 503 when dependencies are unhealthy
+- Initialized during server startup (createHealthCheckService called in start())
+- Compatible with existing error handling (ApiError)
+
+LESSONS LEARNED:
+- Timeout configuration must be actively enforced (Promise.race pattern)
+- Health check error messages should be generic to prevent information leakage
+- Fail-closed is correct for health checks (unlike monitoring which is fail-open)
+- Caching is essential to prevent DoS via repeated health check requests
+- Type-safe health status types (healthy/degraded/unhealthy) improve code clarity

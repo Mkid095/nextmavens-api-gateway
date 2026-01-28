@@ -101,7 +101,7 @@ export class HealthCheckService {
               name: 'control_plane_api',
               status: 'unhealthy',
               latency: this.config.timeoutMs,
-              error: 'Health check timeout'
+              error: 'Connection timeout' // Generic error message
             });
           }, this.config.timeoutMs)
         )
@@ -110,11 +110,14 @@ export class HealthCheckService {
       return healthResult;
     } catch (error) {
       const latency = Date.now() - startTime;
+      // Log detailed error for monitoring
+      console.error('[HealthCheck] Control plane check failed:', error instanceof Error ? error.message : 'Unknown error');
+      // Return generic error to prevent information leakage
       return {
         name: 'control_plane_api',
         status: 'unhealthy',
         latency,
-        error: 'Health check failed'
+        error: 'Service unavailable' // Generic error message
       };
     }
   }
@@ -132,7 +135,7 @@ export class HealthCheckService {
         return {
           name: 'control_plane_api',
           status: 'unhealthy',
-          error: 'Service unavailable'
+          error: 'Service unavailable' // Generic error message
         };
       }
 
@@ -142,11 +145,12 @@ export class HealthCheckService {
       // If no cached data and expired, service might be degraded
       if (!cacheStats.hasCachedData || cacheStats.isExpired) {
         const latency = Date.now() - startTime;
+        // Use generic error messages to prevent information leakage
         return {
           name: 'control_plane_api',
           status: 'degraded',
           latency,
-          error: cacheStats.isExpired ? 'Snapshot expired' : 'No snapshot available'
+          error: 'Data stale' // Generic message, doesn't reveal internal details
         };
       }
 
@@ -158,11 +162,14 @@ export class HealthCheckService {
       };
     } catch (error) {
       const latency = Date.now() - startTime;
+      // Log detailed error for monitoring
+      console.error('[HealthCheck] Control plane check error:', error instanceof Error ? error.message : 'Unknown error');
+      // Return generic error to prevent information leakage
       return {
         name: 'control_plane_api',
         status: 'unhealthy',
         latency,
-        error: 'Health check failed'
+        error: 'Check failed' // Generic error message
       };
     }
   }

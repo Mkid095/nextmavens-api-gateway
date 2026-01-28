@@ -87,17 +87,38 @@ const validationLimiter = rateLimit({
   }
 });
 
+// Health check rate limiter - more restrictive to prevent abuse
+// Health checks should not be called frequently by monitoring systems
+const healthCheckLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 60, // 60 requests per minute per IP (1 per second)
+  standardHeaders: true,
+  legacyHeaders: false,
+  skipSuccessfulRequests: false, // Count all requests including successful ones
+  handler: (_req, res) => {
+    const error = ApiError.rateLimited();
+    res.status(error.statusCode).json(error.toJSON());
+  }
+});
+
 // Health check endpoint (US-010)
 // Enhanced health check with dependency monitoring
 // Returns 503 if any critical dependency is unhealthy (fail-closed)
-app.get('/health', async (_req, res) => {
+//
+// SECURITY:
+// - Rate limited to prevent abuse/DoS attacks
+// - Generic error messages to prevent information leakage
+// - Timeout protection prevents hanging requests
+// - Cache control prevents sensitive data caching
+app.get('/health', healthCheckLimiter, async (_req, res) => {
   try {
     const healthService = getHealthCheckService();
 
     if (!healthService) {
+      // Return generic error without revealing internal details
       const error = new ApiError(
         ApiErrorCode.SERVICE_UNAVAILABLE,
-        'Health check service not available',
+        'Health check unavailable',
         503,
         true
       );
@@ -110,11 +131,19 @@ app.get('/health', async (_req, res) => {
     const statusCode = health.status === 'unhealthy' ? 503 :
                        health.status === 'degraded' ? 200 : 200;
 
+    // Add security headers to health check response
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+
     return res.status(statusCode).json(health);
   } catch (error) {
+    // Log actual error for monitoring, but return generic message to client
+    console.error('[HealthCheck] Error:', error instanceof Error ? error.message : 'Unknown error');
+
     const apiError = new ApiError(
       ApiErrorCode.INTERNAL_ERROR,
-      error instanceof Error ? error.message : 'Health check failed',
+      'Health check failed',
       500,
       false
     );
