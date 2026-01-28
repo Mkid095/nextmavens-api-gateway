@@ -23,6 +23,7 @@ import {
 } from '@/api/middleware/correlation.middleware.js';
 import { requestLoggerMiddleware } from '@/api/middleware/request-logger.middleware.js';
 import { durationTrackingMiddleware } from '@/duration/index.js';
+import { createHealthCheckService, getHealthCheckService } from '@/health/index.js';
 
 const app = express();
 const GATEWAY_PORT = parseInt(process.env.GATEWAY_PORT || '8080', 10);
@@ -86,19 +87,39 @@ const validationLimiter = rateLimit({
   }
 });
 
-// Health check endpoint
-app.get('/health', (_req, res) => {
-  const snapshotService = getSnapshotService();
-  const snapshotStats = snapshotService ? snapshotService.getCacheStats() : null;
+// Health check endpoint (US-010)
+// Enhanced health check with dependency monitoring
+// Returns 503 if any critical dependency is unhealthy (fail-closed)
+app.get('/health', async (_req, res) => {
+  try {
+    const healthService = getHealthCheckService();
 
-  res.json({
-    status: 'ok',
-    service: 'api-gateway',
-    version: '1.0.0',
-    timestamp: new Date().toISOString(),
-    uptime: process.uptime(),
-    snapshot: snapshotStats
-  });
+    if (!healthService) {
+      const error = new ApiError(
+        ApiErrorCode.SERVICE_UNAVAILABLE,
+        'Health check service not available',
+        503,
+        true
+      );
+      return res.status(error.statusCode).json(error.toJSON());
+    }
+
+    const health = await healthService.getHealth();
+
+    // Return appropriate HTTP status based on health status
+    const statusCode = health.status === 'unhealthy' ? 503 :
+                       health.status === 'degraded' ? 200 : 200;
+
+    return res.status(statusCode).json(health);
+  } catch (error) {
+    const apiError = new ApiError(
+      ApiErrorCode.INTERNAL_ERROR,
+      error instanceof Error ? error.message : 'Health check failed',
+      500,
+      false
+    );
+    return res.status(apiError.statusCode).json(apiError.toJSON());
+  }
 });
 
 // Snapshot health check endpoint
@@ -416,6 +437,11 @@ async function start(): Promise<void> {
   console.log('[Gateway] Starting API Gateway...');
 
   try {
+    // Initialize health check service
+    console.log('[Gateway] Initializing health check service...');
+    createHealthCheckService();
+    console.log('[Gateway] Health check service initialized successfully');
+
     // Initialize snapshot service
     console.log('[Gateway] Initializing snapshot service...');
     const snapshotService = createSnapshotService();
@@ -437,6 +463,7 @@ async function start(): Promise<void> {
 ║  ✓ Snapshot consumption with 30s TTL                      ║
 ║  ✓ Background refresh                                     ║
 ║  ✓ Fail-closed security                                   ║
+║  ✓ Dependency health monitoring                           ║
 ║  ✓ JWT authentication with project_id extraction          ║
 ║  ✓ Project status validation                              ║
 ║  ✓ Service enablement checks                              ║
@@ -444,7 +471,7 @@ async function start(): Promise<void> {
 ║  ✓ Centralized error handling                             ║
 ╠══════════════════════════════════════════════════════════════╣
 ║  Public Endpoints:                                         ║
-║  GET  /health          - Gateway health check              ║
+║  GET  /health          - Enhanced health check with deps   ║
 ║  GET  /health/snapshot - Snapshot service status          ║
 ║  GET  /                - Gateway information               ║
 ╠══════════════════════════════════════════════════════════════╣
