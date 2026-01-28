@@ -29,12 +29,23 @@ declare global {
 
 /**
  * Extract project ID from request
- * Checks both JWT-based (req.projectId) and header-based (x-project-id) approaches
+ * Checks multiple sources in priority order:
+ * 1. JWT-based (req.projectId from US-005)
+ * 2. Project validation middleware (req.project from US-002)
+ * 3. Header-based (x-project-id header)
  */
 function extractProjectId(req: Request): string | undefined {
   // Check JWT-based project ID first (from US-005)
   if (req.projectId) {
     return req.projectId;
+  }
+
+  // Check project validation middleware result (from US-002)
+  if ((req as unknown as Record<string, unknown>).project) {
+    const project = (req as unknown as Record<string, unknown>).project as Record<string, unknown>;
+    if (typeof project.id === 'string') {
+      return project.id;
+    }
   }
 
   // Check header-based project ID (x-project-id header)

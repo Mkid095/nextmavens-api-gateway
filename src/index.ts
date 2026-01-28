@@ -22,6 +22,7 @@ import {
   formatLogWithCorrelation
 } from '@/api/middleware/correlation.middleware.js';
 import { requestLoggerMiddleware } from '@/api/middleware/request-logger.middleware.js';
+import { durationTrackingMiddleware } from '@/duration/index.js';
 
 const app = express();
 const GATEWAY_PORT = parseInt(process.env.GATEWAY_PORT || '8080', 10);
@@ -66,10 +67,12 @@ app.use(cors({
 // Must be applied early in the middleware chain to ensure all requests have a correlation ID
 app.use(correlationMiddleware);
 
-// Request logging middleware (US-008)
-// Logs all requests with project_id, correlation_id, path, method, status_code, duration
-// Async logging to avoid blocking requests
-app.use(requestLoggerMiddleware);
+// Duration tracking middleware (US-009)
+// Tracks request duration for performance monitoring
+// Applied after correlation middleware to ensure correlation_id exists
+// Applied before routes to track all requests
+// Non-blocking operation - records asynchronously
+app.use(durationTrackingMiddleware);
 
 // Rate limiting to prevent abuse and project enumeration
 const validationLimiter = rateLimit({
@@ -132,8 +135,16 @@ app.get('/', (_req, res) => {
  * JWT middleware extracts project_id from token claim
  * Project status validation ensures only active projects can access
  * Enforces project-specific rate limits from snapshot
+ *
+ * MIDDLEWARE CHAIN ORDER (US-008):
+ * 1. validationLimiter - Rate limiting
+ * 2. enforceRateLimit - Project-specific rate limits
+ * 3. requireJwtAuth - JWT authentication
+ * 4. extractProjectIdFromJwt - Extract project_id from JWT
+ * 5. validateProjectStatus - Validate project status
+ * 6. requestLoggerMiddleware - Log request with project_id (US-008)
  */
-app.get('/api/jwt/protected', validationLimiter, enforceRateLimit, requireJwtAuth, extractProjectIdFromJwt, validateProjectStatus, async (req: ValidatedRequest, res) => {
+app.get('/api/jwt/protected', validationLimiter, enforceRateLimit, requireJwtAuth, extractProjectIdFromJwt, validateProjectStatus, requestLoggerMiddleware, async (req: ValidatedRequest, res) => {
   const snapshotService = getSnapshotService();
 
   if (!snapshotService) {
@@ -173,8 +184,16 @@ app.get('/api/jwt/protected', validationLimiter, enforceRateLimit, requireJwtAut
  * SECURITY: Rate limited to prevent abuse
  * Demonstrates JWT authentication for data operations
  * Enforces project-specific rate limits from snapshot
+ *
+ * MIDDLEWARE CHAIN ORDER (US-008):
+ * 1. validationLimiter - Rate limiting
+ * 2. enforceRateLimit - Project-specific rate limits
+ * 3. requireJwtAuth - JWT authentication
+ * 4. extractProjectIdFromJwt - Extract project_id from JWT
+ * 5. validateProjectStatus - Validate project status
+ * 6. requestLoggerMiddleware - Log request with project_id (US-008)
  */
-app.post('/api/jwt/data', validationLimiter, enforceRateLimit, requireJwtAuth, extractProjectIdFromJwt, validateProjectStatus, async (req: ValidatedRequest, res) => {
+app.post('/api/jwt/data', validationLimiter, enforceRateLimit, requireJwtAuth, extractProjectIdFromJwt, validateProjectStatus, requestLoggerMiddleware, async (req: ValidatedRequest, res) => {
   res.json({
     message: 'Data received successfully via JWT authentication',
     authentication: {
@@ -226,8 +245,14 @@ app.get('/api/jwt/status', optionalJwtAuth, async (req: ValidatedRequest, res) =
  * This endpoint uses the new validation middleware from Step 2
  * It will reject requests from suspended, archived, or deleted projects
  * Enforces project-specific rate limits from snapshot
+ *
+ * MIDDLEWARE CHAIN ORDER (US-008):
+ * 1. validationLimiter - Rate limiting
+ * 2. enforceRateLimit - Project-specific rate limits
+ * 3. validateProjectStatus - Validate project status (sets req.project)
+ * 4. requestLoggerMiddleware - Log request with project_id (US-008)
  */
-app.get('/api/protected', validationLimiter, enforceRateLimit, validateProjectStatus, async (req: ValidatedRequest, res) => {
+app.get('/api/protected', validationLimiter, enforceRateLimit, validateProjectStatus, requestLoggerMiddleware, async (req: ValidatedRequest, res) => {
   const snapshotService = getSnapshotService();
 
   if (!snapshotService) {
@@ -263,8 +288,14 @@ app.get('/api/protected', validationLimiter, enforceRateLimit, validateProjectSt
  * This demonstrates a more realistic use case where only active projects
  * can POST data to the gateway
  * Enforces project-specific rate limits from snapshot
+ *
+ * MIDDLEWARE CHAIN ORDER (US-008):
+ * 1. validationLimiter - Rate limiting
+ * 2. enforceRateLimit - Project-specific rate limits
+ * 3. validateProjectStatus - Validate project status (sets req.project)
+ * 4. requestLoggerMiddleware - Log request with project_id (US-008)
  */
-app.post('/api/data', validationLimiter, enforceRateLimit, validateProjectStatus, async (req: ValidatedRequest, res) => {
+app.post('/api/data', validationLimiter, enforceRateLimit, validateProjectStatus, requestLoggerMiddleware, async (req: ValidatedRequest, res) => {
   res.json({
     message: 'Data received successfully',
     projectId: req.project?.id,
@@ -307,8 +338,14 @@ app.get('/api/status', attachProjectData, async (req: ValidatedRequest, res) => 
  * This uses requireActiveProject middleware which provides a second
  * validation approach with slightly different error handling
  * Enforces project-specific rate limits from snapshot
+ *
+ * MIDDLEWARE CHAIN ORDER (US-008):
+ * 1. validationLimiter - Rate limiting
+ * 2. enforceRateLimit - Project-specific rate limits
+ * 3. requireActiveProject - Require active project
+ * 4. requestLoggerMiddleware - Log request with project_id (US-008)
  */
-app.get('/api/strict', validationLimiter, enforceRateLimit, requireActiveProject, async (req: ValidatedRequest, res) => {
+app.get('/api/strict', validationLimiter, enforceRateLimit, requireActiveProject, requestLoggerMiddleware, async (req: ValidatedRequest, res) => {
   res.json({
     message: 'Access granted - project is active',
     projectId: req.project?.id,
