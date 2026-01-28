@@ -11,6 +11,13 @@ export {
   type ProjectStatusValidation
 } from './project-status.validator.js';
 
+export {
+  ServiceEnablementValidator,
+  createServiceEnablementValidator,
+  getServiceEnablementValidator,
+  type ServiceEnablementValidation
+} from './service-enablement.validator.js';
+
 // Middleware
 export {
   validateProjectStatus,
@@ -18,6 +25,14 @@ export {
   attachProjectData,
   type ValidatedRequest
 } from './middleware/project-status.middleware.js';
+
+export {
+  validateServiceEnablement,
+  requireServiceEnabled,
+  validateServiceEnabledFor,
+  attachServiceData,
+  type ServiceValidatedRequest
+} from './middleware/service-enablement.middleware.js';
 
 // Services
 export {
