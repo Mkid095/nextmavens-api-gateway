@@ -21,6 +21,7 @@ import {
   correlationMiddleware,
   formatLogWithCorrelation
 } from '@/api/middleware/correlation.middleware.js';
+import { requestLoggerMiddleware } from '@/api/middleware/request-logger.middleware.js';
 
 const app = express();
 const GATEWAY_PORT = parseInt(process.env.GATEWAY_PORT || '8080', 10);
@@ -65,19 +66,10 @@ app.use(cors({
 // Must be applied early in the middleware chain to ensure all requests have a correlation ID
 app.use(correlationMiddleware);
 
-// Request logging middleware with correlation ID
-app.use((req, res, next) => {
-  const startTime = Date.now();
-
-  console.log(formatLogWithCorrelation(req, `${req.method} ${req.path}`));
-
-  res.on('finish', () => {
-    const duration = Date.now() - startTime;
-    console.log(formatLogWithCorrelation(req, `${res.statusCode} - ${duration}ms`));
-  });
-
-  next();
-});
+// Request logging middleware (US-008)
+// Logs all requests with project_id, correlation_id, path, method, status_code, duration
+// Async logging to avoid blocking requests
+app.use(requestLoggerMiddleware);
 
 // Rate limiting to prevent abuse and project enumeration
 const validationLimiter = rateLimit({

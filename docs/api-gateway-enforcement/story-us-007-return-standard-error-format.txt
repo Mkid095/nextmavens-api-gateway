@@ -6,35 +6,43 @@ completedDate: 2026-01-28
 ---
 
 STORY: US-007 - Return Standard Error Format
-========================
+============================================
 
-DESCRIPTION: As a gateway engineer, I want to return standard error format so that errors are consistent.
+DESCRIPTION:
+As a gateway engineer, I want to return standard error format so that errors are consistent.
 
-MAVEN STEPS COMPLETED: [1, 2, 7, 10]
+MAVEN STEPS COMPLETED:
+[1, 2, 7, 10]
 
 IMPLEMENTATION SUMMARY:
-Enhanced the existing ApiError class with RATE_LIMITED static factory method and centralized error response helpers (sendErrorResponse, sendError). Updated all inline error responses throughout the gateway to use the ApiError class, ensuring consistent error format across all endpoints. Created comprehensive integration tests (14/14 passing) and passed security audit (10/10 score).
+Implemented centralized error handling with ApiError class and standardized error response format. All errors now return consistent JSON structure with error code, message, and retryable flag. Error handler middleware ensures uniform error responses across all endpoints.
 
 KEY FILES:
-- api-gateway/src/api/middleware/error.handler.ts - Added rateLimited(), sendErrorResponse(), sendError()
-- api-gateway/src/index.ts - Updated all inline error responses to use ApiError
-- api-gateway/src/snapshot/health.middleware.ts - Updated to use ApiError
-- api-gateway/src/api/middleware/__tests__/middleware-error-format-integration.test.ts - 14 integration tests
-- api-gateway/jest.config.js - Updated for ESM imports
+- src/api/middleware/error.handler.ts - Core error handling implementation
+  * ApiError class with error codes and toJSON() method
+  * Error response helpers (sendErrorResponse, sendError)
+  * Static factory methods for common errors
+  * Error logging and structured error handling utilities
+- src/index.ts - Global error handler middleware
+- src/api/middleware/__tests__/error.handler.test.ts - Error handler tests
+- src/api/middleware/__tests__/error-format-integration.test.ts - Integration tests
+- src/api/middleware/__tests__/global-error-handler-integration.test.ts - Global handler tests
+- src/api/middleware/__tests__/middleware-error-format-integration.test.ts - Middleware error format tests
 
 DECISIONS MADE:
-- Standard error format: { error: { code, message, retryable, details? } }
-- Generic error messages to prevent information leakage (security)
-- Helper functions for convenient error responses
-- All error codes use string constants (ApiErrorCode enum)
+- Error format uses nested structure: { error: { code, message, retryable, details? } }
+- All error codes defined as enum for type safety
+- Static factory methods for common error scenarios (projectSuspended, serviceDisabled, rateLimited, keyInvalid)
+- Security-focused generic error messages to prevent information leakage
+- Retryable flag indicates if client should retry the request
 
 INTEGRATION POINTS:
-- All middleware now uses ApiError: project-status, service-enablement, rate-limit, jwt
-- Global error handler in index.ts properly formats ApiError responses
-- Existing static factory methods: projectNotFound(), projectSuspended(), serviceDisabled(), keyInvalid()
+- Used by all validation middleware (project-status, service-enablement, rate-limit, JWT)
+- Integrated into Express global error handler in src/index.ts
+- All middleware can throw ApiError which gets automatically formatted
 
 LESSONS LEARNED:
-- Error format was already mostly implemented; needed consistency improvements
-- RATE_LIMITED static factory was missing; added with optional details (retryAfter, resetTime)
-- Security audit confirmed no sensitive data leakage in error messages
-- Integration tests ensure all middleware returns consistent error format
+- Centralized error handling improves consistency across the gateway
+- Factory methods prevent code duplication and ensure error format consistency
+- Generic error messages prevent project enumeration attacks
+- Type-safe error codes (enum) catch typos at compile time
