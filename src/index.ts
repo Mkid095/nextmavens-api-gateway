@@ -11,6 +11,7 @@ import {
   attachProjectData,
   type ValidatedRequest
 } from '@/validation/middleware/project-status.middleware.js';
+import { enforceRateLimit } from '@/rate-limit/middleware/index.js';
 import { ApiError } from '@/api/middleware/error.handler.js';
 
 const app = express();
@@ -133,8 +134,9 @@ app.get('/', (_req, res) => {
  * SECURITY: Rate limited to prevent project enumeration attacks
  * This endpoint uses the new validation middleware from Step 2
  * It will reject requests from suspended, archived, or deleted projects
+ * Enforces project-specific rate limits from snapshot
  */
-app.get('/api/protected', validationLimiter, validateProjectStatus, async (req: ValidatedRequest, res) => {
+app.get('/api/protected', validationLimiter, enforceRateLimit, validateProjectStatus, async (req: ValidatedRequest, res) => {
   const snapshotService = getSnapshotService();
 
   if (!snapshotService) {
@@ -179,8 +181,9 @@ app.get('/api/protected', validationLimiter, validateProjectStatus, async (req: 
  * SECURITY: Rate limited to prevent abuse
  * This demonstrates a more realistic use case where only active projects
  * can POST data to the gateway
+ * Enforces project-specific rate limits from snapshot
  */
-app.post('/api/data', validationLimiter, validateProjectStatus, async (req: ValidatedRequest, res) => {
+app.post('/api/data', validationLimiter, enforceRateLimit, validateProjectStatus, async (req: ValidatedRequest, res) => {
   res.json({
     message: 'Data received successfully',
     projectId: req.project?.id,
@@ -222,8 +225,9 @@ app.get('/api/status', attachProjectData, async (req: ValidatedRequest, res) => 
  * SECURITY: Rate limited to prevent abuse
  * This uses requireActiveProject middleware which provides a second
  * validation approach with slightly different error handling
+ * Enforces project-specific rate limits from snapshot
  */
-app.get('/api/strict', validationLimiter, requireActiveProject, async (req: ValidatedRequest, res) => {
+app.get('/api/strict', validationLimiter, enforceRateLimit, requireActiveProject, async (req: ValidatedRequest, res) => {
   res.json({
     message: 'Access granted - project is active',
     projectId: req.project?.id,
@@ -325,8 +329,9 @@ async function start(): Promise<void> {
 ║  ✓ Snapshot consumption with 30s TTL                      ║
 ║  ✓ Background refresh                                     ║
 ║  ✓ Fail-closed security                                   ║
-║  ✓ Project status validation (Step 7 integrated)          ║
+║  ✓ Project status validation                              ║
 ║  ✓ Service enablement checks                              ║
+║  ✓ Rate limiting enforcement (Step 7 integrated)          ║
 ║  ✓ Centralized error handling                             ║
 ╠══════════════════════════════════════════════════════════════╣
 ║  Public Endpoints:                                         ║

@@ -31,14 +31,20 @@ interface SlidingWindowTracker {
  * - Prevents timing attacks with constant-time operations
  * - Fails closed if snapshot unavailable
  * - Prevents request flooding and DoS attacks
+ * - Automatic cleanup prevents memory exhaustion
+ * - LRU eviction prevents unbounded growth
  */
 export class RateLimitValidator {
   private defaultLimits: RateLimitConfig;
   private inMemoryStore: Map<string, SlidingWindowTracker>;
-  private readonly WINDOW_SIZE_MS: Record<RateLimitWindow.MINUTE | RateLimitWindow.HOUR, number> = {
+  private readonly WINDOW_SIZE_MS: Record<RateLimitWindow.MINUTE | RateLimitWindow.HOUR | RateLimitWindow.BURST, number> = {
     [RateLimitWindow.MINUTE]: 60 * 1000,
-    [RateLimitWindow.HOUR]: 60 * 60 * 1000
+    [RateLimitWindow.HOUR]: 60 * 60 * 1000,
+    [RateLimitWindow.BURST]: 10 * 1000 // 10 seconds
   };
+  private readonly MAX_TRACKERS = 10000;
+  private trackerAccessTimes: Map<string, number>;
+  private cleanupInterval: NodeJS.Timeout | null = null;
 
   constructor(defaultLimits?: RateLimitConfig) {
     this.defaultLimits = defaultLimits || {
@@ -47,6 +53,25 @@ export class RateLimitValidator {
       burstAllowance: 10
     };
     this.inMemoryStore = new Map();
+    this.trackerAccessTimes = new Map();
+
+    // Start automatic cleanup every 60 seconds
+    this.cleanupInterval = setInterval(() => {
+      this.clearExpiredBuckets();
+      this.enforceTrackerLimit();
+    }, 60000);
+  }
+
+  /**
+   * Clean up resources when validator is destroyed
+   */
+  dispose(): void {
+    if (this.cleanupInterval) {
+      clearInterval(this.cleanupInterval);
+      this.cleanupInterval = null;
+    }
+    this.inMemoryStore.clear();
+    this.trackerAccessTimes.clear();
   }
 
   /**
@@ -158,24 +183,12 @@ export class RateLimitValidator {
     limit: number
   ): RateLimitValidation {
     const now = context.timestamp;
-
-    // BURST window is not implemented yet, return allowed
-    if (window === RateLimitWindow.BURST) {
-      return {
-        allowed: true,
-        result: {
-          allowed: true,
-          remainingRequests: limit,
-          resetTime: now + 60000,
-          limit,
-          window
-        }
-      };
-    }
-
     const windowSize = this.WINDOW_SIZE_MS[window];
     const windowStart = now - windowSize;
     const storeKey = this.getStoreKey(context.projectId, window);
+
+    // Check tracker limit before creating new tracker
+    this.checkTrackerLimit();
 
     // Get or create tracker
     let tracker = this.inMemoryStore.get(storeKey);
@@ -189,6 +202,9 @@ export class RateLimitValidator {
       };
       this.inMemoryStore.set(storeKey, tracker);
     }
+
+    // Update access time for LRU
+    this.trackerAccessTimes.set(storeKey, now);
 
     // Clean up old timestamps outside the current window
     tracker.requestTimestamps = tracker.requestTimestamps.filter(
@@ -246,7 +262,8 @@ export class RateLimitValidator {
    * @returns Storage key
    */
   private getStoreKey(projectId: string, window: RateLimitWindow): string {
-    return `${projectId}:${window}`;
+    const key = `${projectId}:${window}`;
+    return key;
   }
 
   /**
@@ -347,7 +364,45 @@ export class RateLimitValidator {
       // Remove buckets that are past their window end time
       if (tracker.windowEnd < now) {
         this.inMemoryStore.delete(key);
+        this.trackerAccessTimes.delete(key);
       }
+    }
+  }
+
+  /**
+   * Enforce maximum tracker limit to prevent memory exhaustion
+   * Evicts least recently used trackers when limit is reached
+   *
+   * SECURITY: Prevents DoS via memory exhaustion from unique project IDs
+   */
+  private enforceTrackerLimit(): void {
+    if (this.inMemoryStore.size >= this.MAX_TRACKERS) {
+      // Find least recently used tracker
+      let oldestKey: string | null = null;
+      let oldestTime = Infinity;
+
+      for (const [key, time] of this.trackerAccessTimes.entries()) {
+        if (time < oldestTime) {
+          oldestTime = time;
+          oldestKey = key;
+        }
+      }
+
+      // Evict oldest tracker
+      if (oldestKey) {
+        this.inMemoryStore.delete(oldestKey);
+        this.trackerAccessTimes.delete(oldestKey);
+      }
+    }
+  }
+
+  /**
+   * Check tracker limit before creating new tracker
+   * Calls enforcement if limit is reached
+   */
+  private checkTrackerLimit(): void {
+    if (this.inMemoryStore.size >= this.MAX_TRACKERS) {
+      this.enforceTrackerLimit();
     }
   }
 
@@ -361,11 +416,13 @@ export class RateLimitValidator {
     if (window) {
       const key = this.getStoreKey(projectId, window);
       this.inMemoryStore.delete(key);
+      this.trackerAccessTimes.delete(key);
     } else {
       // Reset all windows for project
       for (const key of this.inMemoryStore.keys()) {
         if (key.startsWith(`${projectId}:`)) {
           this.inMemoryStore.delete(key);
+          this.trackerAccessTimes.delete(key);
         }
       }
     }
