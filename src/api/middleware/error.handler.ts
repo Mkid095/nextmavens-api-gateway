@@ -98,6 +98,30 @@ export class ApiError extends Error {
   }
 
   /**
+   * Create a project archived error
+   */
+  static projectArchived(projectName: string): ApiError {
+    return new ApiError(
+      ApiErrorCode.PROJECT_ARCHIVED,
+      `Project '${projectName}' is archived and cannot accept requests. Please contact support if you need to reactivate this project.`,
+      403,
+      false
+    );
+  }
+
+  /**
+   * Create a project deleted error
+   */
+  static projectDeleted(projectId: string): ApiError {
+    return new ApiError(
+      ApiErrorCode.PROJECT_DELETED,
+      `Project '${projectId}' has been deleted and is no longer available.`,
+      403,
+      false
+    );
+  }
+
+  /**
    * Create a service disabled error
    */
   static serviceDisabled(serviceName: string): ApiError {
