@@ -8,7 +8,7 @@
  * - Setting of x-request-id response header
  */
 
-import { describe, it, expect, beforeEach } from '@jest/globals';
+import { describe, it, expect, beforeEach, jest } from '@jest/globals';
 import { Request, Response, NextFunction } from 'express';
 import {
   correlationMiddleware,
@@ -28,11 +28,11 @@ describe('Correlation Middleware', () => {
     };
 
     mockRes = {
-      setHeader: jest.fn(),
-      getHeader: jest.fn()
+      setHeader: jest.fn() as any,
+      getHeader: jest.fn() as any
     };
 
-    mockNext = jest.fn();
+    mockNext = jest.fn() as any;
   });
 
   /**
@@ -116,10 +116,10 @@ describe('Correlation Middleware', () => {
     it('should generate different IDs for multiple requests without header', () => {
       const mockReq2: Partial<Request> = { headers: {} };
       const mockRes2: Partial<Response> = {
-        setHeader: jest.fn(),
-        getHeader: jest.fn()
+        setHeader: jest.fn() as any,
+        getHeader: jest.fn() as any
       };
-      const mockNext2: NextFunction = jest.fn();
+      const mockNext2: NextFunction = jest.fn() as any;
 
       // Process first request
       correlationMiddleware(
@@ -157,7 +157,7 @@ describe('Correlation Middleware', () => {
       const firstCorrelationId = mockReq.correlationId;
 
       // Reset mockNext
-      mockNext = jest.fn();
+      mockNext = jest.fn() as any;
 
       // Second call (same request object)
       correlationMiddleware(

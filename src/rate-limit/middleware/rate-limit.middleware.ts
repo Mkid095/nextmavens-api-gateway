@@ -121,7 +121,7 @@ export function enforceRateLimit(
 
       // Generic rate limit error if no specific error available
       throw new ApiError(
-        ApiErrorCode.RATE_LIMIT_EXCEEDED,
+        ApiErrorCode.RATE_LIMITED,
         'Rate limit exceeded. Please retry later.',
         429,
         true

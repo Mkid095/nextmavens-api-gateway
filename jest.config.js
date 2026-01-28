@@ -3,13 +3,18 @@ export default {
   testEnvironment: 'node',
   extensionsToTreatAsEsm: ['.ts'],
   moduleNameMapper: {
-    '^@/(.*)$': '<rootDir>/src/$1'
+    '^@/(.*)$': '<rootDir>/src/$1',
+    '^(\\.{1,2}/.*)\\.js$': '$1'
   },
   transform: {
     '^.+\\.ts$': [
       'ts-jest',
       {
-        useESM: true
+        useESM: true,
+        tsconfig: {
+          esModuleInterop: true,
+          allowSyntheticDefaultImports: true
+        }
       }
     ]
   },
@@ -20,5 +25,6 @@ export default {
     '!src/**/__tests__/**'
   ],
   coverageDirectory: 'coverage',
-  verbose: true
+  verbose: true,
+  resolver: undefined
 };

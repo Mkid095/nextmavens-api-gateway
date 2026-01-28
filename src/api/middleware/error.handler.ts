@@ -25,6 +25,7 @@ export enum ApiErrorCode {
 
   // Rate limiting errors
   RATE_LIMIT_EXCEEDED = 'RATE_LIMIT_EXCEEDED',
+  RATE_LIMITED = 'RATE_LIMITED', // Alias for RATE_LIMIT_EXCEEDED
 
   // Generic errors
   INTERNAL_ERROR = 'INTERNAL_ERROR',

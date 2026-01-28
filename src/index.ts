@@ -88,7 +88,7 @@ const validationLimiter = rateLimit({
   handler: (_req, res) => {
     res.status(429).json({
       error: {
-        code: 'RATE_LIMIT_EXCEEDED',
+        code: 'RATE_LIMITED',
         message: 'Too many requests. Please slow down.',
         retryable: true
       }

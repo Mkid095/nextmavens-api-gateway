@@ -279,7 +279,7 @@ export class RateLimitValidator {
     const windowText = violation.window === RateLimitWindow.MINUTE ? 'minute' : 'hour';
 
     return new ApiError(
-      ApiErrorCode.RATE_LIMIT_EXCEEDED,
+      ApiErrorCode.RATE_LIMITED,
       `Rate limit exceeded. Maximum ${violation.limit} requests per ${windowText}. Please retry later.`,
       429,
       true,
