@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { getSnapshotService } from '@/snapshot/snapshot.service.js';
+import { ApiError } from '@/api/middleware/error.handler.js';
 
 /**
  * Health check middleware for snapshot service
@@ -42,11 +43,12 @@ export function checkSnapshotHealth(_req: Request, res: Response): void {
       }
     });
   } catch (error) {
-    res.status(503).json({
+    const apiError = ApiError.snapshotUnavailable(error instanceof Error ? error.message : 'Unknown error');
+    res.status(apiError.statusCode).json({
       status: 'unhealthy',
       snapshot: {
         available: false,
-        message: error instanceof Error ? error.message : 'Unknown error'
+        message: apiError.message
       }
     });
   }

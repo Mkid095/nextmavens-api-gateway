@@ -11,7 +11,7 @@ import {
   type ValidatedRequest
 } from '@/validation/middleware/project-status.middleware.js';
 import { enforceRateLimit } from '@/rate-limit/middleware/index.js';
-import { ApiError } from '@/api/middleware/error.handler.js';
+import { ApiError, ApiErrorCode } from '@/api/middleware/error.handler.js';
 import {
   requireJwtAuth,
   optionalJwtAuth,
@@ -86,13 +86,8 @@ const validationLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   handler: (_req, res) => {
-    res.status(429).json({
-      error: {
-        code: 'RATE_LIMITED',
-        message: 'Too many requests. Please slow down.',
-        retryable: true
-      }
-    });
+    const error = ApiError.rateLimited();
+    res.status(error.statusCode).json(error.toJSON());
   }
 });
 
@@ -150,13 +145,8 @@ app.get('/api/jwt/protected', validationLimiter, enforceRateLimit, requireJwtAut
   const snapshotService = getSnapshotService();
 
   if (!snapshotService) {
-    return res.status(503).json({
-      error: {
-        code: 'SNAPSHOT_UNAVAILABLE',
-        message: 'Snapshot service not available',
-        retryable: true
-      }
-    });
+    const error = ApiError.snapshotUnavailable('Snapshot service not available');
+    return res.status(error.statusCode).json(error.toJSON());
   }
 
   try {
@@ -178,13 +168,8 @@ app.get('/api/jwt/protected', validationLimiter, enforceRateLimit, requireJwtAut
       serviceCount: Object.keys(snapshot.services).length
     });
   } catch (error) {
-    return res.status(503).json({
-      error: {
-        code: 'SNAPSHOT_UNAVAILABLE',
-        message: error instanceof Error ? error.message : 'Snapshot unavailable',
-        retryable: true
-      }
-    });
+    const apiError = ApiError.snapshotUnavailable(error instanceof Error ? error.message : 'Snapshot unavailable');
+    return res.status(apiError.statusCode).json(apiError.toJSON());
   }
 });
 
@@ -254,13 +239,8 @@ app.get('/api/protected', validationLimiter, enforceRateLimit, validateProjectSt
   const snapshotService = getSnapshotService();
 
   if (!snapshotService) {
-    return res.status(503).json({
-      error: {
-        code: 'SNAPSHOT_UNAVAILABLE',
-        message: 'Snapshot service not available',
-        retryable: true
-      }
-    });
+    const error = ApiError.snapshotUnavailable('Snapshot service not available');
+    return res.status(error.statusCode).json(error.toJSON());
   }
 
   try {
@@ -277,13 +257,8 @@ app.get('/api/protected', validationLimiter, enforceRateLimit, validateProjectSt
       serviceCount: Object.keys(snapshot.services).length
     });
   } catch (error) {
-    return res.status(503).json({
-      error: {
-        code: 'SNAPSHOT_UNAVAILABLE',
-        message: error instanceof Error ? error.message : 'Snapshot unavailable',
-        retryable: true
-      }
-    });
+    const apiError = ApiError.snapshotUnavailable(error instanceof Error ? error.message : 'Snapshot unavailable');
+    return res.status(apiError.statusCode).json(apiError.toJSON());
   }
 });
 
@@ -356,13 +331,8 @@ app.get('/api/legacy', async (_req, res) => {
   const snapshotService = getSnapshotService();
 
   if (!snapshotService) {
-    return res.status(503).json({
-      error: {
-        code: 'SNAPSHOT_UNAVAILABLE',
-        message: 'Snapshot service not available',
-        retryable: true
-      }
-    });
+    const error = ApiError.snapshotUnavailable('Snapshot service not available');
+    return res.status(error.statusCode).json(error.toJSON());
   }
 
   try {
@@ -374,25 +344,20 @@ app.get('/api/legacy', async (_req, res) => {
       serviceCount: Object.keys(snapshot.services).length
     });
   } catch (error) {
-    return res.status(503).json({
-      error: {
-        code: 'SNAPSHOT_UNAVAILABLE',
-        message: error instanceof Error ? error.message : 'Snapshot unavailable',
-        retryable: true
-      }
-    });
+    const apiError = ApiError.snapshotUnavailable(error instanceof Error ? error.message : 'Snapshot unavailable');
+    return res.status(apiError.statusCode).json(apiError.toJSON());
   }
 });
 
 // 404 handler
 app.use((req, res) => {
-  res.status(404).json({
-    error: {
-      code: 'NOT_FOUND',
-      message: `Cannot ${req.method} ${req.path}`,
-      retryable: false
-    }
-  });
+  const error = new ApiError(
+    ApiErrorCode.NOT_FOUND,
+    `Cannot ${req.method} ${req.path}`,
+    404,
+    false
+  );
+  res.status(error.statusCode).json(error.toJSON());
 });
 
 // Error handler
@@ -406,13 +371,13 @@ app.use((err: Error, req: express.Request, res: express.Response, _next: express
   }
 
   // Handle generic errors
-  return res.status(500).json({
-    error: {
-      code: 'INTERNAL_ERROR',
-      message: err.message,
-      retryable: false
-    }
-  });
+  const apiError = new ApiError(
+    ApiErrorCode.INTERNAL_ERROR,
+    err.message,
+    500,
+    false
+  );
+  return res.status(apiError.statusCode).json(apiError.toJSON());
 });
 
 /**

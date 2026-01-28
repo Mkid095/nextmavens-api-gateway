@@ -1,3 +1,5 @@
+import type { Response } from 'express';
+
 /**
  * API error types for centralized error handling
  */
@@ -151,6 +153,20 @@ export class ApiError extends Error {
       false
     );
   }
+
+  /**
+   * Create a rate limited error
+   * Used when a project exceeds its rate limit
+   */
+  static rateLimited(details?: { retryAfter?: number; resetTime?: number; limit?: number; window?: string }): ApiError {
+    return new ApiError(
+      ApiErrorCode.RATE_LIMITED,
+      'Rate limit exceeded. Please retry later.',
+      429,
+      true,
+      details
+    );
+  }
 }
 
 /**
@@ -220,4 +236,38 @@ export function logError(error: Error, context: string, metadata?: Record<string
   };
 
   console.error('[Error]', JSON.stringify(logEntry, null, 2));
+}
+
+/**
+ * Centralized error response helper
+ * Sends a properly formatted error response to the client
+ *
+ * @param res - Express response object
+ * @param error - ApiError instance to send
+ */
+export function sendErrorResponse(res: Response, error: ApiError): void {
+  res.status(error.statusCode).json(error.toJSON());
+}
+
+/**
+ * Create and send an error response in one call
+ * Convenience function for common error scenarios
+ *
+ * @param res - Express response object
+ * @param code - ApiErrorCode
+ * @param message - Error message
+ * @param statusCode - HTTP status code (default: 500)
+ * @param retryable - Whether the error is retryable (default: false)
+ * @param details - Optional additional error details
+ */
+export function sendError(
+  res: Response,
+  code: ApiErrorCode,
+  message: string,
+  statusCode: number = 500,
+  retryable: boolean = false,
+  details?: Record<string, unknown>
+): void {
+  const error = new ApiError(code, message, statusCode, retryable, details);
+  sendErrorResponse(res, error);
 }
