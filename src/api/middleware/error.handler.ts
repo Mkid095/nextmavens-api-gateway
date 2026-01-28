@@ -21,6 +21,7 @@ export enum ApiErrorCode {
   UNAUTHORIZED = 'UNAUTHORIZED',
   FORBIDDEN = 'FORBIDDEN',
   INVALID_API_KEY = 'INVALID_API_KEY',
+  KEY_INVALID = 'KEY_INVALID',
 
   // Rate limiting errors
   RATE_LIMIT_EXCEEDED = 'RATE_LIMIT_EXCEEDED',
@@ -133,6 +134,19 @@ export class ApiError extends Error {
       ApiErrorCode.SERVICE_DISABLED,
       `Service '${serviceName}' is not enabled for this project. Please enable it in the developer portal.`,
       403,
+      false
+    );
+  }
+
+  /**
+   * Create a key invalid error for JWT authentication failures
+   * SECURITY: Generic message to prevent information leakage about token structure
+   */
+  static keyInvalid(): ApiError {
+    return new ApiError(
+      ApiErrorCode.KEY_INVALID,
+      'Invalid or malformed authentication token',
+      401,
       false
     );
   }

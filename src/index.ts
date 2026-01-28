@@ -2,7 +2,6 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
-import { randomUUID } from 'crypto';
 import { createSnapshotService, getSnapshotService } from '@/snapshot/snapshot.service.js';
 import { checkSnapshotHealth } from '@/snapshot/snapshot.middleware.js';
 import {
@@ -13,6 +12,15 @@ import {
 } from '@/validation/middleware/project-status.middleware.js';
 import { enforceRateLimit } from '@/rate-limit/middleware/index.js';
 import { ApiError } from '@/api/middleware/error.handler.js';
+import {
+  requireJwtAuth,
+  optionalJwtAuth,
+  extractProjectIdFromJwt
+} from '@/api/middleware/jwt.middleware.js';
+import {
+  correlationMiddleware,
+  formatLogWithCorrelation
+} from '@/api/middleware/correlation.middleware.js';
 
 const app = express();
 const GATEWAY_PORT = parseInt(process.env.GATEWAY_PORT || '8080', 10);
@@ -53,6 +61,24 @@ app.use(cors({
   credentials: true
 }));
 
+// Correlation ID middleware (US-006)
+// Must be applied early in the middleware chain to ensure all requests have a correlation ID
+app.use(correlationMiddleware);
+
+// Request logging middleware with correlation ID
+app.use((req, res, next) => {
+  const startTime = Date.now();
+
+  console.log(formatLogWithCorrelation(req, `${req.method} ${req.path}`));
+
+  res.on('finish', () => {
+    const duration = Date.now() - startTime;
+    console.log(formatLogWithCorrelation(req, `${res.statusCode} - ${duration}ms`));
+  });
+
+  next();
+});
+
 // Rate limiting to prevent abuse and project enumeration
 const validationLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
@@ -68,23 +94,6 @@ const validationLimiter = rateLimit({
       }
     });
   }
-});
-
-// Request logging middleware
-app.use((_req, res, next) => {
-  const startTime = Date.now();
-  const requestId = _req.headers['x-request-id'] as string || randomUUID();
-
-  _req.headers['x-request-id'] = requestId;
-
-  console.log(`[${requestId}] ${_req.method} ${_req.path}`);
-
-  res.on('finish', () => {
-    const duration = Date.now() - startTime;
-    console.log(`[${requestId}] ${res.statusCode} - ${duration}ms`);
-  });
-
-  next();
 });
 
 // Health check endpoint
@@ -123,7 +132,112 @@ app.get('/', (_req, res) => {
 });
 
 // ============================================================================
-// Protected Routes - Project Status Validation
+// Protected Routes - JWT Authentication (US-005)
+// ============================================================================
+
+/**
+ * Route: GET /api/jwt/protected
+ * Description: JWT-protected endpoint with project validation
+ * Requires: Bearer token in Authorization header with project_id claim
+ *
+ * SECURITY: Rate limited to prevent abuse
+ * This endpoint demonstrates JWT authentication integration
+ * JWT middleware extracts project_id from token claim
+ * Project status validation ensures only active projects can access
+ * Enforces project-specific rate limits from snapshot
+ */
+app.get('/api/jwt/protected', validationLimiter, enforceRateLimit, requireJwtAuth, extractProjectIdFromJwt, validateProjectStatus, async (req: ValidatedRequest, res) => {
+  const snapshotService = getSnapshotService();
+
+  if (!snapshotService) {
+    return res.status(503).json({
+      error: {
+        code: 'SNAPSHOT_UNAVAILABLE',
+        message: 'Snapshot service not available',
+        retryable: true
+      }
+    });
+  }
+
+  try {
+    const snapshot = snapshotService.getSnapshot();
+    return res.json({
+      message: 'This endpoint is protected by JWT authentication and project validation',
+      authentication: {
+        method: 'JWT',
+        projectId: req.projectId,
+        jwtPayload: req.jwtPayload
+      },
+      project: {
+        id: req.project?.id,
+        status: 'ACTIVE',
+        validated: true
+      },
+      snapshotVersion: snapshot.version,
+      projectCount: Object.keys(snapshot.projects).length,
+      serviceCount: Object.keys(snapshot.services).length
+    });
+  } catch (error) {
+    return res.status(503).json({
+      error: {
+        code: 'SNAPSHOT_UNAVAILABLE',
+        message: error instanceof Error ? error.message : 'Snapshot unavailable',
+        retryable: true
+      }
+    });
+  }
+});
+
+/**
+ * Route: POST /api/jwt/data
+ * Description: JWT-protected data endpoint with project validation
+ * Requires: Bearer token with project_id claim
+ *
+ * SECURITY: Rate limited to prevent abuse
+ * Demonstrates JWT authentication for data operations
+ * Enforces project-specific rate limits from snapshot
+ */
+app.post('/api/jwt/data', validationLimiter, enforceRateLimit, requireJwtAuth, extractProjectIdFromJwt, validateProjectStatus, async (req: ValidatedRequest, res) => {
+  res.json({
+    message: 'Data received successfully via JWT authentication',
+    authentication: {
+      method: 'JWT',
+      projectId: req.projectId,
+      issuer: req.jwtPayload?.iss,
+      audience: req.jwtPayload?.aud
+    },
+    timestamp: new Date().toISOString(),
+    data: req.body
+  });
+});
+
+/**
+ * Route: GET /api/jwt/status
+ * Description: Check JWT authentication status
+ *
+ * This endpoint optionally validates JWT but doesn't reject if missing
+ * Useful for checking authentication status and token validity
+ */
+app.get('/api/jwt/status', optionalJwtAuth, async (req: ValidatedRequest, res) => {
+  if (req.projectId && req.jwtPayload) {
+    return res.json({
+      authenticated: true,
+      projectId: req.projectId,
+      issuer: req.jwtPayload.iss,
+      audience: req.jwtPayload.aud,
+      expiresAt: req.jwtPayload.exp ? new Date(req.jwtPayload.exp * 1000).toISOString() : undefined
+    });
+  }
+
+  return res.json({
+    authenticated: false,
+    message: 'No valid JWT token provided',
+    hint: 'Include Bearer token in Authorization header to authenticate'
+  });
+});
+
+// ============================================================================
+// Protected Routes - Project Status Validation (Header-based)
 // ============================================================================
 
 /**
@@ -282,8 +396,8 @@ app.use((req, res) => {
 });
 
 // Error handler
-app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
-  console.error('[Gateway] Error:', err);
+app.use((err: Error, req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  console.error(formatLogWithCorrelation(req, `[Gateway] Error: ${err.message}`));
 
   // Handle ApiError instances with proper formatting
   if (err instanceof ApiError) {
@@ -329,9 +443,10 @@ async function start(): Promise<void> {
 ║  ✓ Snapshot consumption with 30s TTL                      ║
 ║  ✓ Background refresh                                     ║
 ║  ✓ Fail-closed security                                   ║
+║  ✓ JWT authentication with project_id extraction          ║
 ║  ✓ Project status validation                              ║
 ║  ✓ Service enablement checks                              ║
-║  ✓ Rate limiting enforcement (Step 7 integrated)          ║
+║  ✓ Rate limiting enforcement                              ║
 ║  ✓ Centralized error handling                             ║
 ╠══════════════════════════════════════════════════════════════╣
 ║  Public Endpoints:                                         ║
@@ -339,7 +454,12 @@ async function start(): Promise<void> {
 ║  GET  /health/snapshot - Snapshot service status          ║
 ║  GET  /                - Gateway information               ║
 ╠══════════════════════════════════════════════════════════════╣
-║  Protected Endpoints (require x-project-id):              ║
+║  JWT-Protected Endpoints (require Bearer token):          ║
+║  GET  /api/jwt/protected - JWT + project validation       ║
+║  POST /api/jwt/data      - JWT-protected data endpoint    ║
+║  GET  /api/jwt/status    - Check JWT status (optional)    ║
+╠══════════════════════════════════════════════════════════════╣
+║  Header-Protected Endpoints (require x-project-id):       ║
 ║  GET  /api/protected   - Project status validation        ║
 ║  POST /api/data         - Data endpoint with validation   ║
 ║  GET  /api/status       - Check project status            ║

@@ -75,16 +75,17 @@ export interface ValidatedRequest extends Request {
 /**
  * Extract project ID from request with strict security rules
  * Priority order (most secure to least secure):
- * 1. From authenticated JWT token (future US-005)
+ * 1. From authenticated JWT token (US-005)
  * 2. From x-project-id header (only if authenticated)
  *
  * SECURITY: Query parameters are NEVER accepted for project ID
  * as they are easily manipulated and can be logged/broadcasted
  */
 function extractProjectId(req: Request): string | null {
-  // Prefer JWT claim when US-005 is implemented
-  // const jwtProjectId = (req as any).auth?.projectId;
-  // if (jwtProjectId) return validateProjectIdFormat(jwtProjectId);
+  // Prefer JWT claim (implemented in US-005)
+  if (req.projectId) {
+    return validateProjectIdFormat(req.projectId);
+  }
 
   // Accept header only (more secure than query param)
   const headerProjectId = req.headers['x-project-id'] as string | undefined;
