@@ -24,6 +24,8 @@ import {
 import { requestLoggerMiddleware } from '@/api/middleware/request-logger.middleware.js';
 import { durationTrackingMiddleware } from '@/duration/index.js';
 import { createHealthCheckService, getHealthCheckService } from '@/health/index.js';
+import { configureAuditRoutes } from '@/api/routes/audit/index.js';
+import { initializeAuditLogs, auditLogsHealthCheck, shutdownAuditLogs } from '@nextmavens/audit-logs-database';
 
 const app = express();
 const GATEWAY_PORT = parseInt(process.env.GATEWAY_PORT || '8080', 10);
@@ -153,6 +155,14 @@ app.get('/health', healthCheckLimiter, async (_req, res) => {
 
 // Snapshot health check endpoint
 app.get('/health/snapshot', checkSnapshotHealth);
+
+// ============================================================================
+// Audit Log Endpoints (US-008)
+// ============================================================================
+
+// Configure audit log routes
+// All audit endpoints require JWT authentication
+configureAuditRoutes(app);
 
 // Gateway info endpoint
 app.get('/', (_req, res) => {
@@ -478,6 +488,26 @@ async function start(): Promise<void> {
 
     console.log('[Gateway] Snapshot service initialized successfully');
 
+    // Initialize audit logs database
+    console.log('[Gateway] Initializing audit logs database...');
+    try {
+      await initializeAuditLogs({ waitForConnection: true });
+
+      // Verify audit logs database connection
+      const auditLogsHealthy = await auditLogsHealthCheck();
+      if (!auditLogsHealthy) {
+        console.warn('[Gateway] Warning: Audit logs database health check failed');
+        console.warn('[Gateway] Audit log queries may not work correctly');
+      } else {
+        console.log('[Gateway] Audit logs database initialized successfully');
+      }
+    } catch (error) {
+      console.error('[Gateway] Failed to initialize audit logs database:', error);
+      console.warn('[Gateway] Audit log queries will not be available');
+      // Don't fail the gateway startup if audit logs initialization fails
+      // The gateway can still function, but audit queries will fail
+    }
+
     // Start HTTP server
     app.listen(GATEWAY_PORT, () => {
       console.log(`
@@ -498,6 +528,7 @@ async function start(): Promise<void> {
 ║  ✓ Service enablement checks                              ║
 ║  ✓ Rate limiting enforcement                              ║
 ║  ✓ Centralized error handling                             ║
+║  ✓ Audit logs database integration                        ║
 ╠══════════════════════════════════════════════════════════════╣
 ║  Public Endpoints:                                         ║
 ║  GET  /health          - Enhanced health check with deps   ║
@@ -508,6 +539,7 @@ async function start(): Promise<void> {
 ║  GET  /api/jwt/protected - JWT + project validation       ║
 ║  POST /api/jwt/data      - JWT-protected data endpoint    ║
 ║  GET  /api/jwt/status    - Check JWT status (optional)    ║
+║  GET  /api/audit         - Query audit logs                ║
 ╠══════════════════════════════════════════════════════════════╣
 ║  Header-Protected Endpoints (require x-project-id):       ║
 ║  GET  /api/protected   - Project status validation        ║
@@ -524,21 +556,39 @@ async function start(): Promise<void> {
 }
 
 // Handle graceful shutdown
-process.on('SIGTERM', () => {
+process.on('SIGTERM', async () => {
   console.log('[Gateway] SIGTERM received, shutting down gracefully...');
   const snapshotService = getSnapshotService();
   if (snapshotService) {
     snapshotService.stop();
   }
+
+  // Shutdown audit logs database
+  try {
+    await shutdownAuditLogs();
+    console.log('[Gateway] Audit logs database shut down successfully');
+  } catch (error) {
+    console.error('[Gateway] Error shutting down audit logs database:', error);
+  }
+
   process.exit(0);
 });
 
-process.on('SIGINT', () => {
+process.on('SIGINT', async () => {
   console.log('[Gateway] SIGINT received, shutting down gracefully...');
   const snapshotService = getSnapshotService();
   if (snapshotService) {
     snapshotService.stop();
   }
+
+  // Shutdown audit logs database
+  try {
+    await shutdownAuditLogs();
+    console.log('[Gateway] Audit logs database shut down successfully');
+  } catch (error) {
+    console.error('[Gateway] Error shutting down audit logs database:', error);
+  }
+
   process.exit(0);
 });
 
