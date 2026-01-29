@@ -22,6 +22,7 @@ import { getJobWorker, type JobWorker } from './worker.js';
 import { checkUsageLimitsHandler } from './handlers/check-usage-limits.handler.js';
 import { rotateKeyHandler } from './handlers/rotate-key.handler.js';
 import { exportBackupHandler } from './handlers/export-backup.handler.js';
+import { exportLogsHandler } from './handlers/export-logs.handler.js';
 import { autoSuspendHandler } from './handlers/auto-suspend.handler.js';
 import { enqueueJob } from './queue.js';
 import { JobType } from '@nextmavens/audit-logs-database';
@@ -57,6 +58,7 @@ export function getJobsWorker(): JobWorker {
   worker.registerHandler(JobType.CHECK_USAGE_LIMITS, checkUsageLimitsHandler);
   worker.registerHandler(JobType.ROTATE_KEY, rotateKeyHandler);
   worker.registerHandler(JobType.EXPORT_BACKUP, exportBackupHandler);
+  worker.registerHandler('export_logs', exportLogsHandler);
   worker.registerHandler(JobType.AUTO_SUSPEND, autoSuspendHandler);
 
   return worker;

@@ -10,13 +10,27 @@
 import { v4 as uuidv4 } from 'uuid';
 import { query } from '@nextmavens/audit-logs-database';
 import type {
-  Backup,
+  Backup as BaseBackup,
   BackupType,
   CreateBackupInput,
   BackupQuery,
-  BackupResponse,
+  BackupResponse as BaseBackupResponse,
   BackupStats,
 } from '@nextmavens/audit-logs-database';
+
+/**
+ * Extended Backup interface with restore_count
+ */
+export interface Backup extends BaseBackup {
+  restore_count: number;
+}
+
+/**
+ * Extended BackupResponse with Backup including restore_count
+ */
+export interface BackupResponse extends Omit<BaseBackupResponse, 'data'> {
+  data: Backup[];
+}
 
 /**
  * Validation constants
@@ -48,6 +62,22 @@ export class BackupError extends Error {
     super(message);
     this.name = 'BackupError';
   }
+}
+
+/**
+ * Convert a database row to a Backup object
+ */
+function rowToBackup(row: Record<string, unknown>): Backup {
+  return {
+    id: row.id as string,
+    project_id: row.project_id as string,
+    type: row.type as BackupType,
+    file_id: row.file_id as string,
+    size: row.size as number,
+    created_at: row.created_at as Date,
+    expires_at: row.expires_at as Date,
+    restore_count: (row.restore_count as number) || 0,
+  };
 }
 
 /**
@@ -207,7 +237,8 @@ export async function createBackup(input: CreateBackupInput): Promise<Backup> {
       file_id,
       size,
       created_at,
-      expires_at
+      expires_at,
+      restore_count
   `;
 
   const values = [
@@ -227,15 +258,7 @@ export async function createBackup(input: CreateBackupInput): Promise<Backup> {
       throw new BackupError('Failed to create backup record', 'CREATE_FAILED');
     }
 
-    return {
-      id: row.id,
-      project_id: row.project_id,
-      type: row.type as BackupType,
-      file_id: row.file_id,
-      size: row.size,
-      created_at: row.created_at,
-      expires_at: row.expires_at,
-    };
+    return rowToBackup(row);
   } catch (error) {
     console.error('Failed to create backup:', error);
     if (error instanceof BackupError) {
@@ -343,7 +366,8 @@ export async function queryByProject(
       file_id,
       size,
       created_at,
-      expires_at
+      expires_at,
+      restore_count
     FROM control_plane.backups
     WHERE ${whereClause}
     ORDER BY created_at DESC
@@ -364,20 +388,12 @@ export async function queryByProject(
     const hasMore = offset + limit < total;
 
     return {
-      data: dataResult.rows.map((row: Record<string, unknown>) => ({
-        id: row.id as string,
-        project_id: row.project_id as string,
-        type: row.type as BackupType,
-        file_id: row.file_id as string,
-        size: row.size as number,
-        created_at: row.created_at as Date,
-        expires_at: row.expires_at as Date,
-      })),
+      data: dataResult.rows.map((row: Record<string, unknown>) => rowToBackup(row)),
       total,
       limit,
       offset,
       has_more: hasMore,
-    };
+    } as BackupResponse;
   } catch (error) {
     console.error('Failed to query backups:', error);
     throw new BackupError('Failed to retrieve backup records', 'DATABASE_ERROR');
@@ -414,7 +430,8 @@ export async function getBackupById(id: string): Promise<Backup | null> {
       file_id,
       size,
       created_at,
-      expires_at
+      expires_at,
+      restore_count
     FROM control_plane.backups
     WHERE id = $1
   `;
@@ -440,6 +457,7 @@ export async function getBackupById(id: string): Promise<Backup | null> {
       size: row.size,
       created_at: row.created_at,
       expires_at: row.expires_at,
+      restore_count: row.restore_count,
     };
   } catch (error) {
     console.error('Failed to get backup by ID:', error);
@@ -505,7 +523,8 @@ export async function updateBackup(
       file_id,
       size,
       created_at,
-      expires_at
+      expires_at,
+      restore_count
   `;
 
   try {
@@ -529,6 +548,7 @@ export async function updateBackup(
       size: row.size,
       created_at: row.created_at,
       expires_at: row.expires_at,
+      restore_count: row.restore_count,
     };
   } catch (error) {
     console.error('Failed to update backup:', error);
@@ -622,7 +642,8 @@ export async function queryByTypeAndDateRange(
       file_id,
       size,
       created_at,
-      expires_at
+      expires_at,
+      restore_count
     FROM control_plane.backups
     WHERE project_id = $1
       AND type = $2
@@ -654,20 +675,12 @@ export async function queryByTypeAndDateRange(
     const hasMore = offset + limit < total;
 
     return {
-      data: dataResult.rows.map((row: Record<string, unknown>) => ({
-        id: row.id as string,
-        project_id: row.project_id as string,
-        type: row.type as BackupType,
-        file_id: row.file_id as string,
-        size: row.size as number,
-        created_at: row.created_at as Date,
-        expires_at: row.expires_at as Date,
-      })),
+      data: dataResult.rows.map((row: Record<string, unknown>) => rowToBackup(row)),
       total,
       limit,
       offset,
       has_more: hasMore,
-    };
+    } as BackupResponse;
   } catch (error) {
     console.error('Failed to query backups by type and date range:', error);
     throw new BackupError('Failed to retrieve backup records', 'DATABASE_ERROR');
@@ -768,4 +781,90 @@ export async function deleteExpiredBackups(projectId: string): Promise<number> {
     console.error('Failed to delete expired backups:', error);
     throw new BackupError('Failed to delete expired backups', 'DATABASE_ERROR');
   }
+}
+
+/**
+ * Increment restore count for a backup
+ *
+ * @param id - The backup ID
+ * @returns The updated backup record or null if not found
+ *
+ * @example
+ * ```typescript
+ * const updated = await incrementRestoreCount('backup-123');
+ * if (updated) {
+ *   console.log('Backup has been restored', updated.restore_count, 'times');
+ * }
+ * ```
+ */
+export async function incrementRestoreCount(id: string): Promise<Backup | null> {
+  if (typeof id !== 'string') {
+    throw new BackupError('Backup ID must be a string', 'INVALID_BACKUP_ID');
+  }
+  if (id.trim().length === 0) {
+    throw new BackupError('Backup ID cannot be empty', 'INVALID_BACKUP_ID');
+  }
+
+  const queryText = `
+    UPDATE control_plane.backups
+    SET restore_count = restore_count + 1
+    WHERE id = $1
+    RETURNING
+      id,
+      project_id,
+      type,
+      file_id,
+      size,
+      created_at,
+      expires_at,
+      restore_count
+  `;
+
+  try {
+    const result = await query(queryText, [id]);
+
+    if (result.rows.length === 0) {
+      return null;
+    }
+
+    const row = result.rows[0];
+
+    if (!row) {
+      return null;
+    }
+
+    return {
+      id: row.id,
+      project_id: row.project_id,
+      type: row.type as BackupType,
+      file_id: row.file_id,
+      size: row.size,
+      created_at: row.created_at,
+      expires_at: row.expires_at,
+      restore_count: row.restore_count,
+    };
+  } catch (error) {
+    console.error('Failed to increment restore count:', error);
+    throw new BackupError('Failed to increment restore count', 'DATABASE_ERROR');
+  }
+}
+
+/**
+ * Get backup metadata for restore
+ *
+ * @param id - The backup ID
+ * @returns The backup metadata or null if not found
+ *
+ * @example
+ * ```typescript
+ * const metadata = await getBackupMetadata('backup-123');
+ * if (metadata) {
+ *   console.log('Backup type:', metadata.type);
+ *   console.log('Backup size:', metadata.size);
+ *   console.log('Times restored:', metadata.restore_count);
+ * }
+ * ```
+ */
+export async function getBackupMetadata(id: string): Promise<Backup | null> {
+  return await getBackupById(id);
 }
