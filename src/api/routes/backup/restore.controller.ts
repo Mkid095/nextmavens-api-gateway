@@ -116,6 +116,17 @@ export async function restoreBackup(req: Request, res: Response, next: NextFunct
   try {
     const startTime = Date.now();
 
+    // SECURITY CRITICAL: Verify user is authenticated
+    // JWT middleware should have set req.projectId and req.jwtPayload
+    if (!req.projectId || !req.jwtPayload) {
+      throw new ApiError(
+        ApiErrorCode.UNAUTHORIZED,
+        'Authentication required',
+        401,
+        false
+      );
+    }
+
     // Extract and validate request body
     const body = req.body as RestoreRequest;
 
@@ -138,6 +149,26 @@ export async function restoreBackup(req: Request, res: Response, next: NextFunct
         ApiErrorCode.VALIDATION_ERROR,
         message,
         400,
+        false
+      );
+    }
+
+    // SECURITY CRITICAL: Authorization check - verify project_id in request matches JWT
+    // This prevents users from restoring backups for other projects
+    if (body.project_id !== req.projectId) {
+      // Log the unauthorized attempt for security monitoring
+      console.error('[Security] Unauthorized restore attempt:', {
+        authenticated_project_id: req.projectId,
+        requested_project_id: body.project_id,
+        timestamp: new Date().toISOString(),
+        ip: req.ip,
+        user_agent: req.headers['user-agent']
+      });
+
+      throw new ApiError(
+        ApiErrorCode.FORBIDDEN,
+        'Access denied', // Generic message to prevent project enumeration
+        403,
         false
       );
     }
@@ -192,6 +223,18 @@ export async function restoreBackup(req: Request, res: Response, next: NextFunct
       );
     }
 
+    // SECURITY: Log restore attempt for audit trail
+    console.log('[Audit] Restore operation initiated:', {
+      project_id: body.project_id,
+      backup_id: body.backup_id,
+      file_id: body.file_id,
+      force: body.force,
+      async: body.async,
+      authenticated_project_id: req.projectId,
+      timestamp: new Date().toISOString(),
+      ip: req.ip
+    });
+
     // Perform restore operation
     const restoreResult = await restoreFromBackup({
       backup_id: body.backup_id,
@@ -199,6 +242,16 @@ export async function restoreBackup(req: Request, res: Response, next: NextFunct
       project_id: body.project_id,
       force: body.force || false,
       async: body.async,
+    });
+
+    // SECURITY: Log restore result for audit trail
+    console.log('[Audit] Restore operation completed:', {
+      project_id: body.project_id,
+      success: restoreResult.success,
+      status: restoreResult.status,
+      duration_ms: Date.now() - startTime,
+      authenticated_project_id: req.projectId,
+      timestamp: new Date().toISOString()
     });
 
     // Format response

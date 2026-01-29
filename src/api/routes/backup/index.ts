@@ -32,6 +32,31 @@ const backupLimiter = rateLimit({
 });
 
 /**
+ * Restore endpoint rate limiter (STRICTER)
+ * Restore operations are destructive and require stricter limits
+ * SECURITY: Limits restore attempts to prevent abuse and data loss
+ */
+const restoreLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 3, // 3 restore attempts per hour per project
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req: Request) => {
+    // Rate limit by project_id (from JWT) rather than IP
+    // This prevents bypassing via different IPs
+    return req.projectId || req.ip || 'unknown';
+  },
+  handler: (_req: Request, res: Response) => {
+    const error = ApiError.rateLimited({
+      limit: 3,
+      window: '1 hour',
+      retryAfter: 3600
+    });
+    res.status(error.statusCode).json(error.toJSON());
+  }
+});
+
+/**
  * Configure and return backup routes
  *
  * Routes:
@@ -142,23 +167,25 @@ export function configureBackupRoutes(router: Router): void {
    * Restore database from backup
    *
    * MIDDLEWARE CHAIN:
-   * 1. backupLimiter - Rate limiting to prevent abuse
+   * 1. restoreLimiter - STRICT rate limiting (3/hour per project)
    * 2. requireJwtAuth - JWT authentication required
    * 3. restoreBackup - Handle the request
    *
    * SECURITY:
-   * - Requires valid JWT token
-   * - Rate limited to prevent DoS
+   * - Requires valid JWT token with project_id claim
+   * - Authorization check: Verifies project_id in request matches JWT
+   * - STRICT rate limiting: 3 restores per hour per project
    * - SQL injection protected through parameterized queries
-   * - Command injection protected through input validation
+   * - Command injection protected through input validation and array spawn arguments
    * - Validates project_id, backup_id, and file_id format
    * - Requires force=true to prevent accidental data overwrite
    * - Returns warning about data overwrite in all responses
+   * - Audit logging for all restore attempts and results
    * - Supports async processing for large backups
    *
    * REQUEST BODY:
    * {
-   *   "project_id": string,         // Required: Project to restore
+   *   "project_id": string,         // Required: Project to restore (MUST match JWT)
    *   "backup_id": string,          // Optional: Backup ID to restore
    *   "file_id": string,            // Optional: Telegram file ID to restore
    *   "force": boolean,             // Required: Must be true to confirm overwrite
@@ -183,8 +210,9 @@ export function configureBackupRoutes(router: Router): void {
    * ERROR RESPONSES:
    * - 400: Validation error (missing/invalid project_id, backup_id, file_id, or force)
    * - 401: Unauthorized (missing or invalid JWT)
-   * - 429: Rate limited (too many requests)
+   * - 403: Forbidden (project_id in request does not match JWT)
+   * - 429: Rate limited (too many restore attempts)
    * - 500: Internal server error (restore failure)
    */
-  router.post('/backup/restore', backupLimiter, requireJwtAuth, restoreBackup);
+  router.post('/backup/restore', restoreLimiter, requireJwtAuth, restoreBackup);
 }

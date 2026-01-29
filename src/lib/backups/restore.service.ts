@@ -4,7 +4,7 @@
  * Handles restoration of database backups from Telegram storage.
  * Supports both synchronous (small backups) and asynchronous (large backups) restoration.
  *
- * US-006: Implement Restore from Backup - Step 1: Foundation
+ * US-006: Implement Restore from Backup - Step 7: Data Layer
  */
 
 import { spawn } from 'child_process';
@@ -14,8 +14,14 @@ import { join } from 'path';
 import { tmpdir } from 'node:os';
 import { createGunzip } from 'zlib';
 import { pipeline } from 'stream/promises';
-import { getBackupById } from './backups.service.js';
+import { getBackupById, incrementRestoreCount } from './backups.service.js';
+import {
+  recordRestoreOperation,
+  updateRestoreStatus,
+} from './restore-history.service.js';
+import type { RestoreHistory } from './restore-history.types.js';
 import type { Backup } from '@nextmavens/audit-logs-database';
+import { RestoreStatus } from './restore-history.types.js';
 
 /**
  * Restore validation constants
@@ -403,6 +409,7 @@ export async function restoreFromBackup(options: RestoreOptions): Promise<Restor
 
   let tempFilePath: string | null = null;
   let backupRecord: Backup | null = null;
+  let restoreHistory: RestoreHistory | null = null;
 
   try {
     // Step 1: Get backup record if backup_id provided
@@ -410,6 +417,17 @@ export async function restoreFromBackup(options: RestoreOptions): Promise<Restor
       backupRecord = await getBackupRecord(options.backup_id, options.file_id);
 
       if (!backupRecord) {
+        // Record failed restore attempt (only if we have a file_id)
+        if (options.file_id) {
+          await recordRestoreOperation(
+            options.project_id,
+            options.backup_id,
+            options.file_id,
+            RestoreStatus.FAILED,
+            'Backup not found'
+          ).catch((err) => console.error('[Restore] Failed to record restore history:', err));
+        }
+
         return {
           success: false,
           status: 'failed',
@@ -420,6 +438,15 @@ export async function restoreFromBackup(options: RestoreOptions): Promise<Restor
 
       // Verify project ownership
       if (backupRecord.project_id !== options.project_id) {
+        // Record failed restore attempt
+        await recordRestoreOperation(
+          options.project_id,
+          options.backup_id,
+          backupRecord.file_id,
+          RestoreStatus.FAILED,
+          'Backup does not belong to the specified project'
+        ).catch((err) => console.error('[Restore] Failed to record restore history:', err));
+
         return {
           success: false,
           status: 'failed',
@@ -433,8 +460,22 @@ export async function restoreFromBackup(options: RestoreOptions): Promise<Restor
         options.async || backupRecord.size > VALIDATION.MAX_SYNC_RESTORE_SIZE;
 
       if (shouldUseAsync) {
+        // Record pending async restore
+        restoreHistory = await recordRestoreOperation(
+          options.project_id,
+          options.backup_id,
+          backupRecord.file_id,
+          RestoreStatus.PENDING
+        );
+
         // TODO: Enqueue async restore job
         // For now, return an error indicating async is not yet implemented
+        await updateRestoreStatus(
+          restoreHistory.id,
+          RestoreStatus.FAILED,
+          'Async restore not yet implemented - use smaller backup or implement async job handler'
+        ).catch((err) => console.error('[Restore] Failed to update restore history:', err));
+
         return {
           success: false,
           status: 'failed',
@@ -448,6 +489,17 @@ export async function restoreFromBackup(options: RestoreOptions): Promise<Restor
     const fileId = options.file_id || backupRecord?.file_id;
 
     if (!fileId) {
+      // Record failed restore attempt
+      if (backupRecord) {
+        await recordRestoreOperation(
+          options.project_id,
+          backupRecord.id,
+          backupRecord.file_id,
+          RestoreStatus.FAILED,
+          'No file ID available for restore'
+        ).catch((err) => console.error('[Restore] Failed to record restore history:', err));
+      }
+
       return {
         success: false,
         status: 'failed',
@@ -456,28 +508,58 @@ export async function restoreFromBackup(options: RestoreOptions): Promise<Restor
       };
     }
 
-    // Step 3: Fetch backup from Telegram
+    // Step 3: Record restore operation as pending
+    restoreHistory = await recordRestoreOperation(
+      options.project_id,
+      options.backup_id,
+      fileId,
+      RestoreStatus.PENDING
+    );
+
+    // Step 4: Update status to in_progress
+    await updateRestoreStatus(restoreHistory.id, RestoreStatus.IN_PROGRESS).catch((err) =>
+      console.error('[Restore] Failed to update restore history:', err)
+    );
+
+    // Step 5: Fetch backup from Telegram
     console.log(`[Restore] Fetching backup from Telegram: ${fileId}`);
     tempFilePath = await fetchFromTelegram(fileId);
 
-    // Step 4: Decompress if needed
+    // Step 6: Decompress if needed
     const decompressedPath = await decompressBackup(tempFilePath);
     tempFilePath = decompressedPath;
 
-    // Step 5: Get schema name (tenant_{project_id})
+    // Step 7: Get schema name (tenant_{project_id})
     const schemaName = `tenant_${options.project_id}`;
 
-    // Step 6: Restore to database
+    // Step 8: Restore to database
     console.log(`[Restore] Restoring to schema: ${schemaName}`);
     const tablesRestored = await restoreToDatabase(tempFilePath, schemaName);
 
-    // Step 7: Prepare result
+    // Step 9: Prepare result
     const durationMs = Date.now() - startTime;
     const backupSize = backupRecord?.size || 0;
 
     console.log(
       `[Restore] Successfully restored ${tablesRestored} tables for project ${options.project_id} in ${durationMs}ms`
     );
+
+    // Step 10: Update restore history as completed
+    await updateRestoreStatus(
+      restoreHistory.id,
+      RestoreStatus.COMPLETED,
+      undefined,
+      tablesRestored,
+      durationMs,
+      backupSize
+    ).catch((err) => console.error('[Restore] Failed to update restore history:', err));
+
+    // Step 11: Increment restore count on backup record
+    if (backupRecord) {
+      await incrementRestoreCount(backupRecord.id).catch((err) =>
+        console.error('[Restore] Failed to increment restore count:', err)
+      );
+    }
 
     return {
       success: true,
@@ -489,17 +571,33 @@ export async function restoreFromBackup(options: RestoreOptions): Promise<Restor
     };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+
+    // SECURITY: Log detailed error server-side but return generic message to client
+    // This prevents information leakage about database structure, paths, etc.
     console.error(`[Restore] Failed to restore backup:`, {
       error: errorMessage,
+      error_name: error instanceof Error ? error.name : 'Unknown',
       project_id: options.project_id,
       backup_id: options.backup_id,
       timestamp: new Date().toISOString(),
+      // Don't log stack traces in production - they may contain sensitive data
     });
+
+    // SECURITY: Return generic error message to client
+    // Specific error details are logged server-side for debugging
+    const safeErrorMessage = 'Restore operation failed. Please check the backup file and try again.';
+
+    // Update restore history as failed if we have a record
+    if (restoreHistory) {
+      await updateRestoreStatus(restoreHistory.id, RestoreStatus.FAILED, safeErrorMessage).catch(
+        (err) => console.error('[Restore] Failed to update restore history:', err)
+      );
+    }
 
     return {
       success: false,
       status: 'failed',
-      error: errorMessage,
+      error: safeErrorMessage,
       warning: 'Restoring from backup will overwrite existing data',
     };
   } finally {
