@@ -8,13 +8,13 @@
  */
 
 import { spawn } from 'child_process';
-import { unlink } from 'fs/promises';
-import { createReadStream, unlinkSync } from 'fs';
+import { unlink, writeFile } from 'fs/promises';
+import { createReadStream, createWriteStream } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'node:os';
 import { createGunzip } from 'zlib';
 import { pipeline } from 'stream/promises';
-import { getBackupById, BackupError } from './backups.service.js';
+import { getBackupById } from './backups.service.js';
 import type { Backup } from '@nextmavens/audit-logs-database';
 
 /**
@@ -152,7 +152,7 @@ function validateProjectId(projectId: string): void {
  */
 async function getBackupRecord(
   backupId: string | undefined,
-  fileId: string | undefined
+  _fileId: string | undefined
 ): Promise<Backup | null> {
   if (backupId) {
     return await getBackupById(backupId);
@@ -215,8 +215,7 @@ async function fetchFromTelegram(fileId: string): Promise<string> {
   const tempFilePath = join(tmpdir(), `restore_${Date.now()}.sql.gz`);
 
   // Create a mock file for testing
-  const fs = await import('fs/promises');
-  await fs.writeFile(tempFilePath, '-- Mock SQL backup file\n');
+  await writeFile(tempFilePath, '-- Mock SQL backup file\n');
 
   return tempFilePath;
 }
@@ -237,7 +236,7 @@ async function decompressBackup(compressedPath: string): Promise<string> {
   await pipeline(
     createReadStream(compressedPath),
     createGunzip(),
-    createReadStream(decompressedPath, { flags: 'w' })
+    createWriteStream(decompressedPath)
   );
 
   // Clean up compressed file
