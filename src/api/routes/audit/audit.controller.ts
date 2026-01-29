@@ -43,6 +43,7 @@ function validateAndParseQueryParams(params: AuditLogQueryParams): {
     action?: string;
     target_type?: string;
     target_id?: string;
+    request_id?: string;
     start_date?: Date;
     end_date?: Date;
     limit?: number;
@@ -56,6 +57,7 @@ function validateAndParseQueryParams(params: AuditLogQueryParams): {
     action?: string;
     target_type?: string;
     target_id?: string;
+    request_id?: string;
     start_date?: Date;
     end_date?: Date;
     limit?: number;
@@ -135,6 +137,25 @@ function validateAndParseQueryParams(params: AuditLogQueryParams): {
       });
     } else {
       query.target_id = params.target_id;
+    }
+  }
+
+  // Validate request_id (optional, but must be string if provided)
+  if (params.request_id) {
+    if (typeof params.request_id !== 'string') {
+      errors.push({
+        field: 'request_id',
+        message: 'request_id must be a string',
+        received: typeof params.request_id
+      });
+    } else if (params.request_id.length > 500) {
+      errors.push({
+        field: 'request_id',
+        message: 'request_id must be less than 500 characters',
+        received: `${params.request_id.length} characters`
+      });
+    } else {
+      query.request_id = params.request_id;
     }
   }
 
@@ -245,6 +266,7 @@ function validateAndParseQueryParams(params: AuditLogQueryParams): {
  * - action: Filter by action type
  * - target_type: Filter by target type
  * - target_id: Filter by target ID
+ * - request_id: Filter by correlation/request ID
  * - start_date: Filter by start date (ISO 8601)
  * - end_date: Filter by end date (ISO 8601)
  * - limit: Maximum number of results (default: 100, max: 1000)

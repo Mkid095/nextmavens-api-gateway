@@ -18,6 +18,7 @@ export interface AuditLogQueryParams {
   action?: string;
   target_type?: string;
   target_id?: string;
+  request_id?: string;
   start_date?: string;
   end_date?: string;
   limit?: string;
