@@ -25,6 +25,7 @@
     "jsonwebtoken": "^9.0.3",
     "rate-limiter-flexible": "^4.0.1",
     "redis": "^4.6.11",
+    "telegram-deployment-bot": "link:../telegram-service",
     "uuid": "^9.0.1"
   },
   "devDependencies": {
@@ -41,6 +42,7 @@
     "supertest": "^7.2.2",
     "ts-jest": "^29.4.6",
     "tsc-alias": "^1.8.16",
+    "tsx": "^4.21.0",
     "typescript": "^5.9.3"
   }
 }

@@ -26,6 +26,8 @@
 
 import type { JobExecutionResult, JobPayload } from '@nextmavens/audit-logs-database';
 import { query } from '@nextmavens/audit-logs-database';
+import type { BackupHistoryInput, BackupHistoryType } from '@nextmavens/audit-logs-database';
+import { recordBackup } from '@nextmavens/audit-logs-database';
 import { spawn } from 'child_process';
 import { unlink, stat } from 'fs/promises';
 import { createWriteStream } from 'fs';
@@ -112,6 +114,11 @@ interface BackupMetadata extends Record<string, unknown> {
    * Number of tables included in the backup
    */
   tableCount: number;
+
+  /**
+   * Backup history record ID (if recording was successful)
+   */
+  backupHistoryId?: string;
 }
 
 /**
@@ -276,9 +283,35 @@ export async function exportBackupHandler(
     const storagePath = storage_path || generateStoragePath(project_id, backupFormat);
     console.log(`[ExportBackup] Uploading backup to storage: ${storagePath}`);
 
-    await uploadToTelegramStorage(tempFilePath, storagePath);
+    const fileId = await uploadToTelegramStorage(tempFilePath, storagePath);
 
-    // Step 5: Send notification if email provided
+    // Step 5: Record backup in history (non-blocking - failure should not fail the backup)
+    let backupHistoryId: string | undefined;
+    try {
+      console.log(`[ExportBackup] Recording backup in history for project ${project_id}`);
+
+      const backupInput: BackupHistoryInput = {
+        project_id: project_id,
+        type: 'export' as BackupHistoryType,
+        file_id: fileId,
+        size: sizeBytes,
+      };
+
+      const recordResult = await recordBackup(backupInput);
+
+      if (recordResult.success && recordResult.backup.id) {
+        backupHistoryId = recordResult.backup.id;
+        console.log(`[ExportBackup] Successfully recorded backup in history: ${backupHistoryId}`);
+      } else {
+        console.warn(`[ExportBackup] Failed to record backup in history: ${recordResult.error || 'Unknown error'}`);
+      }
+    } catch (error) {
+      // Recording failure should NOT fail the backup job
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.warn(`[ExportBackup] Failed to record backup in history: ${errorMessage}`);
+    }
+
+    // Step 6: Send notification if email provided
     if (notify_email) {
       await sendNotification(
         notify_email,
@@ -292,7 +325,7 @@ export async function exportBackupHandler(
       });
     }
 
-    // Step 6: Prepare result metadata
+    // Step 7: Prepare result metadata
     const durationMs = Date.now() - startTime;
     const metadata: BackupMetadata = {
       projectId: project_id,
@@ -303,6 +336,7 @@ export async function exportBackupHandler(
       createdAt: new Date(),
       durationMs,
       tableCount,
+      backupHistoryId,
     };
 
     console.log(`[ExportBackup] Successfully completed backup for project ${project_id} in ${durationMs}ms`);
@@ -844,13 +878,14 @@ async function countTablesInDumpSafe(
  *
  * @param filePath - Path to the backup file
  * @param storagePath - Target path in Telegram storage
+ * @returns The file_id from Telegram storage (or storage path for mock)
  *
  * @throws Error if upload fails
  */
 async function uploadToTelegramStorage(
   filePath: string,
   storagePath: string
-): Promise<void> {
+): Promise<string> {
   // TODO: Implement actual Telegram storage upload
   // This would involve:
   // 1. Reading the backup file
@@ -871,11 +906,16 @@ async function uploadToTelegramStorage(
   //
   // const fileId = response.data.result.document.file_id;
   // console.log(`[ExportBackup] Uploaded to Telegram, file_id: ${fileId}`);
+  // return fileId;
 
   console.log(`[ExportBackup] Mock: Uploaded ${filePath} to Telegram storage path: ${storagePath}`);
 
   // Simulate upload delay
   await new Promise((resolve) => setTimeout(resolve, 100));
+
+  // Return a mock file_id (in production, this would be the actual Telegram file_id)
+  // For now, use the storage path as the file identifier
+  return storagePath;
 }
 
 /**
