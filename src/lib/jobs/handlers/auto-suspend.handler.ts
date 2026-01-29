@@ -512,9 +512,10 @@ export async function autoSuspendHandler(
     const project = await getProjectDetails(config.project_id);
 
     if (!project) {
+      // Don't reveal if project exists or not - use generic message
       return {
         success: false,
-        error: `Project not found: ${config.project_id}`,
+        error: 'Invalid project ID',
       };
     }
 

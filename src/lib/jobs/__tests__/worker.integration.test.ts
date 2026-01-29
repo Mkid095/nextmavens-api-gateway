@@ -17,8 +17,8 @@
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from '@jest/globals';
 import { query } from '@nextmavens/audit-logs-database';
-import { JobWorker } from '../worker';
-import { enqueueJob } from '../queue';
+import { JobWorker } from '../worker.js';
+import { enqueueJob } from '../queue.js';
 import { JobStatus, type JobHandler, type JobPayload } from '@nextmavens/audit-logs-database';
 
 /**

@@ -26,6 +26,7 @@ import { durationTrackingMiddleware } from '@/duration/index.js';
 import { createHealthCheckService, getHealthCheckService } from '@/health/index.js';
 import { configureAuditRoutes } from '@/api/routes/audit/index.js';
 import { configureJobRoutes } from '@/api/routes/jobs/index.js';
+import { configureBackupRoutes } from '@/api/routes/backup/index.js';
 import { initializeAuditLogs, auditLogsHealthCheck, shutdownAuditLogs } from '@nextmavens/audit-logs-database';
 import { initializeJobsWorker, shutdownJobsWorker } from '@/lib/jobs/index.js';
 
@@ -173,6 +174,14 @@ configureAuditRoutes(app);
 // Configure job status routes
 // All job endpoints require JWT authentication
 configureJobRoutes(app);
+
+// ============================================================================
+// Backup Endpoints (US-001)
+// ============================================================================
+
+// Configure backup routes
+// All backup endpoints require JWT authentication
+configureBackupRoutes(app);
 
 // Gateway info endpoint
 app.get('/', (_req, res) => {

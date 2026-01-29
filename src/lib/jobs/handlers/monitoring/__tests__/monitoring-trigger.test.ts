@@ -19,18 +19,20 @@ import {
 import { AbusePatternType } from '../../auto-suspend.handler.js';
 
 // Mock the auto-suspend handler
-jest.mock('../../auto-suspend.handler.js', () => ({
+const mockEnqueueAutoSuspendJob = jest.fn() as any;
+const mockGetProjectMetrics = jest.fn() as any;
+const mockGetProjectBaseline = jest.fn() as any;
+
+jest.mock('../../auto-suspend.handler', () => ({
   AbusePatternType: {
     EXCESSIVE_USAGE: 'excessive_usage',
     ERROR_SPIKE: 'error_spike',
     SUSPICIOUS_PATTERN: 'suspicious_pattern',
   },
-  enqueueAutoSuspendJob: jest.fn(),
-  getProjectMetrics: jest.fn(),
-  getProjectBaseline: jest.fn(),
+  enqueueAutoSuspendJob: mockEnqueueAutoSuspendJob,
+  getProjectMetrics: mockGetProjectMetrics,
+  getProjectBaseline: mockGetProjectBaseline,
 }));
-
-import { enqueueAutoSuspendJob, getProjectMetrics, getProjectBaseline } from '../../auto-suspend.handler.js';
 
 describe('Monitoring Trigger', () => {
   beforeEach(() => {
@@ -94,7 +96,7 @@ describe('Monitoring Trigger', () => {
 
   describe('triggerAutoSuspendFromMetrics', () => {
     it('should successfully trigger auto-suspend with valid metrics', async () => {
-      (enqueueAutoSuspendJob as jest.Mock).mockResolvedValue('job-123');
+      mockEnqueueAutoSuspendJob.mockResolvedValue('job-123');
 
       const result = await triggerAutoSuspendFromMetrics({
         projectId: 'proj-123',
@@ -109,7 +111,7 @@ describe('Monitoring Trigger', () => {
 
       expect(result.success).toBe(true);
       expect(result.job_id).toBe('job-123');
-      expect(enqueueAutoSuspendJob).toHaveBeenCalledWith({
+      expect(mockEnqueueAutoSuspendJob).toHaveBeenCalledWith({
         projectId: 'proj-123',
         patternType: AbusePatternType.EXCESSIVE_USAGE,
         metrics: {
@@ -122,7 +124,7 @@ describe('Monitoring Trigger', () => {
     });
 
     it('should handle errors when enqueueing job fails', async () => {
-      (enqueueAutoSuspendJob as jest.Mock).mockRejectedValue(new Error('Database error'));
+      mockEnqueueAutoSuspendJob.mockRejectedValue(new Error('Database error'));
 
       const result = await triggerAutoSuspendFromMetrics({
         projectId: 'proj-123',
@@ -140,19 +142,19 @@ describe('Monitoring Trigger', () => {
 
   describe('triggerAutoSuspendFromAnalysis', () => {
     it('should trigger auto-suspend when metrics exceed thresholds', async () => {
-      (getProjectMetrics as jest.Mock).mockResolvedValue({
+      mockGetProjectMetrics.mockResolvedValue({
         requests_per_minute: 5000,
         error_rate: 0.1,
         total_requests: 5000,
         error_count: 500,
       });
 
-      (getProjectBaseline as jest.Mock).mockResolvedValue({
+      mockGetProjectBaseline.mockResolvedValue({
         baseline_requests_per_minute: 500,
         baseline_error_rate: 0.1,
       });
 
-      (enqueueAutoSuspendJob as jest.Mock).mockResolvedValue('job-456');
+      mockEnqueueAutoSuspendJob.mockResolvedValue('job-456');
 
       const result = await triggerAutoSuspendFromAnalysis({
         projectId: 'proj-123',
@@ -173,14 +175,14 @@ describe('Monitoring Trigger', () => {
     });
 
     it('should not trigger when metrics do not exceed thresholds', async () => {
-      (getProjectMetrics as jest.Mock).mockResolvedValue({
+      mockGetProjectMetrics.mockResolvedValue({
         requests_per_minute: 600,
         error_rate: 0.1,
         total_requests: 600,
         error_count: 60,
       });
 
-      (getProjectBaseline as jest.Mock).mockResolvedValue({
+      mockGetProjectBaseline.mockResolvedValue({
         baseline_requests_per_minute: 500,
         baseline_error_rate: 0.1,
       });
@@ -196,19 +198,19 @@ describe('Monitoring Trigger', () => {
     });
 
     it('should trigger for error spike when error rate exceeds threshold', async () => {
-      (getProjectMetrics as jest.Mock).mockResolvedValue({
+      mockGetProjectMetrics.mockResolvedValue({
         requests_per_minute: 1000,
         error_rate: 0.6,
         total_requests: 500,
         error_count: 300,
       });
 
-      (getProjectBaseline as jest.Mock).mockResolvedValue({
+      mockGetProjectBaseline.mockResolvedValue({
         baseline_requests_per_minute: 500,
         baseline_error_rate: 0.1,
       });
 
-      (enqueueAutoSuspendJob as jest.Mock).mockResolvedValue('job-789');
+      mockEnqueueAutoSuspendJob.mockResolvedValue('job-789');
 
       const result = await triggerAutoSuspendFromAnalysis({
         projectId: 'proj-123',
@@ -222,7 +224,7 @@ describe('Monitoring Trigger', () => {
 
   describe('processMonitoringAlert', () => {
     it('should process valid monitoring alert', async () => {
-      (enqueueAutoSuspendJob as jest.Mock).mockResolvedValue('job-999');
+      mockEnqueueAutoSuspendJob.mockResolvedValue('job-999');
 
       const payload = {
         project_id: 'proj-123',
@@ -256,8 +258,7 @@ describe('Monitoring Trigger', () => {
 
   describe('batchCheckProjectsForAbuse', () => {
     it('should check multiple projects and trigger where needed', async () => {
-      (getProjectMetrics as jest.Mock)
-        .mockResolvedValueOnce({
+      mockGetProjectMetrics.mockResolvedValueOnce({
           requests_per_minute: 5000,
           error_rate: 0.1,
           total_requests: 5000,
@@ -270,8 +271,7 @@ describe('Monitoring Trigger', () => {
           error_count: 60,
         });
 
-      (getProjectBaseline as jest.Mock)
-        .mockResolvedValueOnce({
+      mockGetProjectBaseline.mockResolvedValueOnce({
           baseline_requests_per_minute: 500,
           baseline_error_rate: 0.1,
         })
@@ -280,7 +280,7 @@ describe('Monitoring Trigger', () => {
           baseline_error_rate: 0.1,
         });
 
-      (enqueueAutoSuspendJob as jest.Mock).mockResolvedValue('job-batch');
+      mockEnqueueAutoSuspendJob.mockResolvedValue('job-batch');
 
       const results = await batchCheckProjectsForAbuse({
         projectIds: ['proj-123', 'proj-456'],

@@ -15,9 +15,9 @@
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from '@jest/globals';
 import { query } from '@nextmavens/audit-logs-database';
-import { JobWorker } from '../worker';
-import { enqueueJob } from '../queue';
-import { rotateKeyHandler } from '../handlers/rotate-key.handler';
+import { JobWorker } from '../worker.js';
+import { enqueueJob } from '../queue.js';
+import { rotateKeyHandler } from '../handlers/rotate-key.handler.js';
 import { JobStatus } from '@nextmavens/audit-logs-database';
 
 /**

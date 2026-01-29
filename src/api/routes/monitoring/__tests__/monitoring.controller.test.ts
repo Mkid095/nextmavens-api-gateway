@@ -13,12 +13,13 @@ import express from 'express';
 import { autoSuspendWebhook, monitoringWebhookHealth, monitoringWebhookDocs } from '../monitoring.controller.js';
 
 // Mock the monitoring trigger module
-jest.mock('@/lib/jobs/handlers/monitoring/monitoring-trigger.js', () => ({
-  processMonitoringAlert: jest.fn(),
-  validateMonitoringAlertPayload: jest.fn(),
-}));
+const mockProcessMonitoringAlert = jest.fn() as any;
+const mockValidateMonitoringAlertPayload = jest.fn() as any;
 
-import { processMonitoringAlert, validateMonitoringAlertPayload } from '@/lib/jobs/handlers/monitoring/monitoring-trigger.js';
+jest.mock('@/lib/jobs/handlers/monitoring/monitoring-trigger.js', () => ({
+  processMonitoringAlert: mockProcessMonitoringAlert,
+  validateMonitoringAlertPayload: mockValidateMonitoringAlertPayload,
+}));
 
 function createTestApp() {
   const app = express();
@@ -36,8 +37,8 @@ describe('Monitoring Webhook Controller', () => {
 
   describe('POST /api/monitoring/webhook/auto-suspend', () => {
     it('should successfully process valid webhook payload', async () => {
-      (validateMonitoringAlertPayload as jest.Mock).mockReturnValue({ valid: true });
-      (processMonitoringAlert as jest.Mock).mockResolvedValue({
+      mockValidateMonitoringAlertPayload.mockReturnValue({ valid: true });
+      mockProcessMonitoringAlert.mockResolvedValue({
         success: true,
         job_id: 'job-123',
         triggered_at: new Date(),
@@ -65,8 +66,8 @@ describe('Monitoring Webhook Controller', () => {
         processed_at: expect.any(String),
       });
 
-      expect(validateMonitoringAlertPayload).toHaveBeenCalled();
-      expect(processMonitoringAlert).toHaveBeenCalled();
+      expect(mockValidateMonitoringAlertPayload).toHaveBeenCalled();
+      expect(mockProcessMonitoringAlert).toHaveBeenCalled();
     });
 
     it('should reject payload with invalid project_id format', async () => {
@@ -117,8 +118,8 @@ describe('Monitoring Webhook Controller', () => {
     });
 
     it('should handle processing failure gracefully', async () => {
-      (validateMonitoringAlertPayload as jest.Mock).mockReturnValue({ valid: true });
-      (processMonitoringAlert as jest.Mock).mockResolvedValue({
+      mockValidateMonitoringAlertPayload.mockReturnValue({ valid: true });
+      mockProcessMonitoringAlert.mockResolvedValue({
         success: false,
         error: 'Metrics do not meet threshold',
         triggered_at: new Date(),
@@ -159,8 +160,8 @@ describe('Monitoring Webhook Controller', () => {
     });
 
     it('should accept valid project IDs with different formats', async () => {
-      (validateMonitoringAlertPayload as jest.Mock).mockReturnValue({ valid: true });
-      (processMonitoringAlert as jest.Mock).mockResolvedValue({
+      mockValidateMonitoringAlertPayload.mockReturnValue({ valid: true });
+      mockProcessMonitoringAlert.mockResolvedValue({
         success: true,
         job_id: 'job-456',
         triggered_at: new Date(),
@@ -186,8 +187,8 @@ describe('Monitoring Webhook Controller', () => {
     });
 
     it('should support all valid pattern types', async () => {
-      (validateMonitoringAlertPayload as jest.Mock).mockReturnValue({ valid: true });
-      (processMonitoringAlert as jest.Mock).mockResolvedValue({
+      mockValidateMonitoringAlertPayload.mockReturnValue({ valid: true });
+      mockProcessMonitoringAlert.mockResolvedValue({
         success: true,
         job_id: 'job-789',
         triggered_at: new Date(),
