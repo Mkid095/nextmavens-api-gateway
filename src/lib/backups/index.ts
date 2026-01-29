@@ -6,6 +6,7 @@
  * US-003: Create Backup History Table - Step 7: Data Layer
  * US-002: Send Backup to Telegram - Step 7: Data Layer Integration
  * US-006: Implement Restore from Backup - Step 1: Foundation
+ * US-010: Backup Retention Policy - Step 1: Foundation
  */
 
 // Data layer functions
@@ -46,6 +47,53 @@ export type {
   RestoreResult,
   RestoreOptions,
 } from './restore.service.js';
+
+// Retention cleanup service
+export {
+  cleanupExpiredBackups,
+  sendExpirationNotifications,
+  getEligibleBackups,
+  getBackupsNeedingNotification,
+  markBackupNotified,
+  deleteBackupFromTelegram,
+  cleanupBackup,
+  getRetentionStats,
+  getRetentionConfig,
+  RetentionCleanupService,
+  RetentionError,
+} from './retention.service.js';
+
+export type {
+  BackupWithRetention,
+  CleanupResult,
+  NotificationResult,
+  EligibleBackup,
+  RetentionCleanupPayload,
+  NotificationPayload,
+  RetentionStats as BackupRetentionStats,
+} from './retention.types.js';
+
+export {
+  RetentionStatus,
+  NotificationChannel,
+  DEFAULT_RETENTION_CONFIG,
+  RETENTION_VALIDATION,
+} from './retention.types.js';
+
+// Retention configuration
+export {
+  getConfig as getRetentionConfigFromEnv,
+  validateRetentionConfig,
+  config,
+  RETENTION_DAYS,
+  NOTIFICATION_DAYS,
+  CLEANUP_ENABLED,
+  CLEANUP_INTERVAL_HOURS,
+  CLEANUP_BATCH_SIZE,
+  MAX_CLEANUP_RETRIES,
+} from './retention.config.js';
+
+export type { RetentionConfig } from './retention.types.js';
 
 // Re-export types from the database package
 export type {

@@ -70,6 +70,7 @@ export { rotateKeyHandler } from './handlers/rotate-key.handler.js';
 export { checkUsageLimitsHandler } from './handlers/check-usage-limits.handler.js';
 export { exportBackupHandler } from './handlers/export-backup.handler.js';
 export { autoSuspendHandler } from './handlers/auto-suspend.handler.js';
+export { cleanupExpiredBackupsHandler, notifyBackupExpirationHandler } from './handlers/cleanup-backups.handler.js';
 
 // ============================================================================
 // JOB WORKER INITIALIZATION
