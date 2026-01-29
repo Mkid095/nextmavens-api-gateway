@@ -5,12 +5,14 @@
  *
  * US-001: Create Manual Export API
  * US-006: Implement Restore from Backup
+ * US-008: Export Logs
  */
 
 import type { Router, Request, Response } from 'express';
 import rateLimit from 'express-rate-limit';
 import { manualExport } from './backup.controller.js';
 import { restoreBackup } from './restore.controller.js';
+import { exportLogs } from './logs-export.controller.js';
 import { requireJwtAuth } from '@/api/middleware/jwt.middleware.js';
 import { ApiError } from '@/api/middleware/error.handler.js';
 
@@ -82,6 +84,58 @@ export function configureBackupRoutes(router: Router): void {
    * - 500: Internal server error
    */
   router.post('/backup/export', backupLimiter, requireJwtAuth, manualExport);
+
+  /**
+   * POST /api/backup/export-logs
+   * Export project audit logs
+   *
+   * MIDDLEWARE CHAIN:
+   * 1. backupLimiter - Rate limiting to prevent abuse
+   * 2. requireJwtAuth - JWT authentication required
+   * 3. exportLogs - Handle the request
+   *
+   * SECURITY:
+   * - Requires valid JWT token
+   * - Rate limited to prevent DoS
+   * - SQL injection protected through parameterized queries
+   * - Input validation for all filters
+   * - Validates project ID format before enqueueing job
+   * - Async processing via job queue (prevents timeout on large exports)
+   *
+   * REQUEST BODY:
+   * {
+   *   "project_id": string,              // Required: Project to export logs for
+   *   "format": "json" | "text",         // Optional: Export format (default: json)
+   *   "date_range": {                    // Optional: Date range filter
+   *     "from": string,                  // ISO 8601 start date
+   *     "to": string                     // ISO 8601 end date
+   *   },
+   *   "action_filter": string[],         // Optional: Filter by action types
+   *   "actor_type_filter": string[],     // Optional: Filter by actor types
+   *   "max_entries": number,             // Optional: Max entries (default: 10000)
+   *   "notify_email": string,            // Optional: Email notification
+   *   "send_to_telegram": boolean,       // Optional: Send to Telegram (default: true)
+   *   "storage_path": string,            // Optional: Custom storage path
+   *   "compress": boolean                // Optional: Compress output
+   * }
+   *
+   * RESPONSE (202 Accepted):
+   * {
+   *   "data": {
+   *     "job_id": string,               // Job ID for tracking progress
+   *     "status": "pending",            // Initial job status
+   *     "project_id": string,           // Project being exported
+   *     "created_at": string            // ISO 8601 timestamp
+   *   }
+   * }
+   *
+   * ERROR RESPONSES:
+   * - 400: Validation error (invalid project_id, format, date range, filters, or email)
+   * - 401: Unauthorized (missing or invalid JWT)
+   * - 429: Rate limited (too many requests)
+   * - 500: Internal server error
+   */
+  router.post('/backup/export-logs', backupLimiter, requireJwtAuth, exportLogs);
 
   /**
    * POST /api/backup/restore
