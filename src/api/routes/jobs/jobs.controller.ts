@@ -6,10 +6,13 @@
  *
  * US-010: Create Job Status API
  * US-011: Create Job Retry API
+ * US-011: Security Fix - Add project ownership verification and audit logging
  */
 
 import type { Request, Response, NextFunction } from 'express';
-import { getJob, retryJob } from '@nextmavens/audit-logs-database';
+import { getJob, retryJob, logAuditEventFromRequest } from '@nextmavens/audit-logs-database';
+import { ActorType, TargetType, type RequestContext } from '@nextmavens/audit-logs-database';
+import type { Job } from '@nextmavens/audit-logs-database';
 import type {
   JobStatusApiResponse,
   JobStatusResponse,
@@ -33,26 +36,27 @@ function isValidJobId(jobId: string): boolean {
 }
 
 /**
+ * Convert Express Request to RequestContext
+ * Extracts relevant information for audit logging
+ */
+function toRequestContext(req: Request): RequestContext {
+  return {
+    ip: req.ip,
+    userAgent: req.get('user-agent'),
+    requestId: req.get('x-request-id'),
+    headers: req.headers,
+  };
+}
+
+/**
  * Convert Job to JobStatusResponse
  * Formats database Job object for API response
  */
-function formatJobStatusResponse(job: {
-  id: string;
-  type: string;
-  payload: Record<string, unknown>;
-  status: string;
-  attempts: number;
-  max_attempts: number;
-  last_error: string | null;
-  scheduled_at: Date;
-  started_at: Date | null;
-  completed_at: Date | null;
-  created_at: Date;
-}): JobStatusResponse {
+function formatJobStatusResponse(job: Job): JobStatusResponse {
   return {
     id: job.id,
     type: job.type,
-    status: job.status as any,
+    status: job.status,
     payload: job.payload,
     attempts: job.attempts,
     max_attempts: job.max_attempts,
@@ -139,10 +143,13 @@ export async function getJobStatus(req: Request, res: Response, next: NextFuncti
  * - Requires authentication (JWT)
  * - Validates job ID format
  * - Checks max_attempts limit to prevent infinite retries
+ * - **AUTHORIZATION**: Verifies project ownership before allowing retry
+ * - Uses projectId from JWT to ensure users can only retry their own jobs
  * - Clears last_error and resets timestamps
  * - Input validation prevents invalid UUIDs from reaching database
+ * - **AUDIT LOGGING**: Logs all retry attempts for security audit trail
  *
- * @param req - Express request with job ID in params
+ * @param req - Express request with job ID in params and projectId from JWT
  * @param res - Express response
  * @param next - Express next function
  */
@@ -161,10 +168,43 @@ export async function retryJobEndpoint(req: Request, res: Response, next: NextFu
       );
     }
 
-    // Retry the job
-    // SECURITY: retryJob uses parameterized queries internally
-    // and checks max_attempts limit before allowing retry
-    const job = await retryJob(id);
+    // SECURITY: Verify projectId exists in request (set by JWT middleware)
+    if (!req.projectId) {
+      throw new ApiError(
+        ApiErrorCode.UNAUTHORIZED,
+        'Authentication required',
+        401,
+        false
+      );
+    }
+
+    // Retry the job with project ownership verification
+    // SECURITY: retryJob now requires projectId and verifies ownership
+    // This prevents authorization bypass where users could retry any job
+    const job = await retryJob(id, req.projectId);
+
+    // Log audit event for security monitoring
+    // This creates a security audit trail of all retry operations
+    try {
+      await logAuditEventFromRequest({
+        actorId: req.projectId,
+        actorType: ActorType.PROJECT,
+        action: 'job.retried',
+        targetType: TargetType.JOB,
+        targetId: job.id,
+        metadata: {
+          job_type: job.type,
+          job_status: job.status,
+          attempts: job.attempts,
+          max_attempts: job.max_attempts,
+        },
+        request: toRequestContext(req),
+      });
+    } catch (auditError) {
+      // Don't fail the request if audit logging fails
+      // Log the error but continue with the response
+      console.error('Failed to log audit event for job retry:', auditError);
+    }
 
     // Format response
     const response: JobRetryApiResponse = {
@@ -205,23 +245,11 @@ export async function retryJobEndpoint(req: Request, res: Response, next: NextFu
  * Convert Job to JobRetryResponse
  * Formats database Job object for API response
  */
-function formatJobRetryResponse(job: {
-  id: string;
-  type: string;
-  payload: Record<string, unknown>;
-  status: string;
-  attempts: number;
-  max_attempts: number;
-  last_error: string | null;
-  scheduled_at: Date;
-  started_at: Date | null;
-  completed_at: Date | null;
-  created_at: Date;
-}): JobRetryResponse {
+function formatJobRetryResponse(job: Job): JobRetryResponse {
   return {
     id: job.id,
     type: job.type,
-    status: job.status as any,
+    status: job.status,
     attempts: job.attempts,
     max_attempts: job.max_attempts,
     scheduled_at: job.scheduled_at.toISOString(),
