@@ -1,0 +1,47 @@
+---
+memoryVersion: 1
+storyId: US-009
+storyTitle: Implement Auto Suspend Job
+completedDate: 2026-01-29
+---
+
+STORY: US-009 - Implement Auto Suspend Job
+==========================================
+
+DESCRIPTION:
+As a platform operator, I want auto-suspend to run as a background job so that abuse is detected and stopped automatically.
+
+MAVEN STEPS COMPLETED: [1, 2, 7, 10]
+
+IMPLEMENTATION SUMMARY:
+Created comprehensive auto suspend job handler with abuse detection for excessive usage, error spikes, and suspicious patterns. Implemented monitoring webhook API with authentication and rate limiting, plus full integration with Prometheus, Grafana, and Datadog.
+
+KEY FILES:
+- src/lib/jobs/handlers/auto-suspend.handler.ts - Main handler with abuse detection logic (533 lines)
+- src/lib/jobs/handlers/monitoring/monitoring-trigger.ts - Programmatic trigger API (447 lines)
+- src/api/routes/monitoring/monitoring.controller.ts - Webhook endpoints (384 lines)
+- src/api/middleware/monitoring-auth.middleware.ts - API key authentication
+- src/api/middleware/rate-limit.middleware.ts - Rate limiting for DoS prevention
+- src/lib/jobs/handlers/MONITORING_INTEGRATION.md - Integration guide
+- src/lib/jobs/handlers/MONITORING_SECURITY.md - Security documentation
+
+DECISIONS MADE:
+- One-shot job pattern (maxAttempts: 1) to prevent duplicate suspensions
+- Abuse thresholds: 10x baseline for excessive usage, 50% error rate for spikes
+- Webhook authentication via X-Monitoring-API-Key header with constant-time comparison
+- Rate limiting at 10 requests/minute for monitoring endpoints
+- All abuse detections logged to control_plane.audit_logs for compliance
+
+INTEGRATION POINTS:
+- Uses JobWorker from US-003 for job execution
+- Uses control_plane.jobs table (US-001)
+- Uses control_plane.audit_logs for metrics and audit trail
+- Suspends projects via UPDATE control_plane.projects SET status = 'SUSPENDED'
+- Webhook endpoints integrate with external monitoring systems (Prometheus, Grafana, Datadog)
+
+LESSONS LEARNED:
+- Monitoring webhooks require authentication to prevent abuse triggers
+- Rate limiting essential for public webhook endpoints
+- Constant-time comparison prevents timing attacks on API keys
+- IP whitelist provides defense-in-depth for monitoring systems
+- Audit trail critical for compliance and forensic analysis

@@ -1,0 +1,44 @@
+---
+memoryVersion: 1
+storyId: US-008
+storyTitle: Implement Check Usage Limits Job
+completedDate: 2026-01-29
+---
+
+STORY: US-008 - Implement Check Usage Limits Job
+========================
+
+DESCRIPTION:
+As a platform operator, I want usage limit checks to run as scheduled jobs so that quotas are enforced automatically.
+
+MAVEN STEPS COMPLETED: [1, 2, 7, 10]
+
+IMPLEMENTATION SUMMARY:
+Created the check_usage_limits job handler that automatically enforces project quotas. The handler checks all projects against their configured quotas, suspends projects exceeding hard caps (100%), and sends warnings at 80% and 90% thresholds. Integrated with the job worker system to run hourly via scheduler.
+
+KEY FILES:
+- api-gateway/src/lib/jobs/handlers/check-usage-limits.handler.ts - Main job handler (492 lines)
+- api-gateway/src/lib/jobs/__tests__/check-usage-limits.integration.test.ts - Integration tests (800+ lines)
+- api-gateway/src/lib/jobs/jobs-worker.ts - Centralized worker initialization (255 lines)
+- api-gateway/src/lib/jobs/index.ts - Updated exports
+- api-gateway/src/index.ts - Integrated worker startup/shutdown with gateway lifecycle
+
+DECISIONS MADE:
+- Used HardCapType enum for 4 quota types: DB queries, realtime connections, storage uploads, function invocations
+- Implemented dry-run mode for testing without actual suspensions
+- Hourly scheduling via setInterval with 60-minute interval
+- Threshold-based actions: warnings at 80%/90%, suspension at 100%
+- Used existing control_plane.projects and control_plane.project_quotas tables
+
+INTEGRATION POINTS:
+- Uses JobWorker from US-003 for job execution
+- Uses enqueueJob from US-002 for job scheduling
+- Reads from control_plane schema tables (projects, project_quotas)
+- Will be integrated with metrics system for actual usage data (currently mocked)
+
+LESSONS LEARNED:
+- Parameterized queries essential for SQL injection prevention
+- One-shot vs recurring jobs need different handling
+- Authorization checks needed for manual job triggering (security finding)
+- Input validation needed for project_ids parameter (security finding)
+- ESM module imports require .js extensions in test files
