@@ -12,7 +12,7 @@
  * - Max attempts: 3
  * - Exponential backoff for retries
  *
- * US-004: Implement Provision Project Job - Step 1: Foundation
+ * US-004: Implement Provision Project Job - Step 10: Security & Error Handling
  *
  * @example
  * ```typescript
@@ -32,136 +32,20 @@
  * ```
  */
 
-import type { JobExecutionResult, JobPayload } from '@nextmavens/audit-logs-database';
+import type { JobPayload, JobExecutionResult } from '@nextmavens/audit-logs-database';
 import { enqueueJob } from '../queue.js';
-
-/**
- * Provision project handler payload
- */
-interface ProvisionProjectPayload extends JobPayload {
-  /**
-   * The ID of the project to provision
-   */
-  project_id: string;
-
-  /**
-   * Target region for infrastructure deployment
-   */
-  region: string;
-
-  /**
-   * Database configuration options
-   */
-  database?: {
-    engine?: 'postgresql' | 'mysql';
-    version?: string;
-    size?: string;
-    storage_gb?: number;
-  };
-
-  /**
-   * Service integration flags
-   */
-  services?: {
-    /**
-     * Enable auth service integration
-     */
-    auth?: boolean;
-    /**
-     * Enable realtime service integration
-     */
-    realtime?: boolean;
-    /**
-     * Enable storage service integration
-     */
-    storage?: boolean;
-  };
-
-  /**
-   * API key generation options
-   */
-  api_keys?: {
-    /**
-     * Number of keys to generate
-     */
-    count?: number;
-    /**
-     * Key prefix for identification
-     */
-    prefix?: string;
-  };
-
-  /**
-   * Optional owner/user ID
-   */
-  owner_id?: string;
-
-  /**
-   * Organization ID for multi-tenant support
-   */
-  organization_id?: string;
-}
-
-/**
- * Provisioning result metadata
- */
-interface ProvisionProjectMetadata extends Record<string, unknown> {
-  /**
-   * The ID of the provisioned project
-   */
-  projectId: string;
-
-  /**
-   * Database connection details (without password for security)
-   */
-  database?: {
-    host: string;
-    port: number;
-    database_name: string;
-    schema_name: string;
-  };
-
-  /**
-   * Registered service details
-   */
-  services?: {
-    auth?: {
-      enabled: boolean;
-      tenant_id: string;
-      endpoint: string;
-    };
-    realtime?: {
-      enabled: boolean;
-      tenant_id: string;
-      endpoint: string;
-    };
-    storage?: {
-      enabled: boolean;
-      tenant_id: string;
-      endpoint: string;
-      bucket_name: string;
-    };
-  };
-
-  /**
-   * Generated API keys
-   */
-  api_keys?: Array<{
-    key_id: string;
-    key_prefix: string;
-    created_at: Date;
-  }>;
-
-  /**
-   * Provisioning metadata
-   */
-  metadata: {
-    provisioned_at: Date;
-    region: string;
-    owner_id?: string;
-    organization_id?: string;
-  };
-}
+import {
+  createTenantDatabase,
+  createTenantSchema,
+  registerAuthService,
+  registerRealtimeService,
+  registerStorageService,
+  generateApiKeys,
+  type ProvisionProjectPayload,
+  type ProvisionProjectMetadata,
+  validateProvisionProjectPayload,
+  ProvisioningError,
+} from './provision-project/index.js';
 
 /**
  * Retry configuration
@@ -230,17 +114,19 @@ export async function provisionProjectHandler(
   // Validate payload
   const params = payload as ProvisionProjectPayload;
 
-  if (!params.project_id) {
+  try {
+    // Validate all input fields
+    validateProvisionProjectPayload(params);
+  } catch (error) {
+    if (error instanceof ProvisioningError) {
+      return {
+        success: false,
+        error: `Validation failed: ${error.message}`,
+      };
+    }
     return {
       success: false,
-      error: 'Missing required field: project_id',
-    };
-  }
-
-  if (!params.region) {
-    return {
-      success: false,
-      error: 'Missing required field: region',
+      error: 'Validation failed',
     };
   }
 
@@ -248,60 +134,50 @@ export async function provisionProjectHandler(
   const startTime = Date.now();
 
   try {
-    // TODO: Implement actual provisioning logic
-    // This will involve:
-    // 1. Verify project exists and is eligible for provisioning
-    // 2. Create tenant database
-    // 3. Create tenant schema with proper permissions
-    // 4. Register with auth service (if enabled)
-    // 5. Register with realtime service (if enabled)
-    // 6. Register with storage service (if enabled)
-    // 7. Generate initial API keys
-    // 8. Return provisioned infrastructure details
-
     console.log(`[ProvisionProject] Provisioning project ${params.project_id} in region ${params.region}`);
 
-    // Mock implementation for Step 1
-    // In a real implementation, this would call the actual provisioning functions
+    // Step 1: Create tenant database
+    const databaseInfo = await createTenantDatabase(params.project_id);
+
+    // Step 2: Create tenant schema
+    const schemaInfo = await createTenantSchema(params.project_id, databaseInfo.database_name);
+
+    // Step 3-5: Register with services (if enabled)
+    const services: ProvisionProjectMetadata['services'] = {};
+
+    if (params.services?.auth) {
+      console.log(`[ProvisionProject] Registering with auth service...`);
+      services.auth = await registerAuthService(params.project_id, params.region);
+    }
+
+    if (params.services?.realtime) {
+      console.log(`[ProvisionProject] Registering with realtime service...`);
+      services.realtime = await registerRealtimeService(params.project_id, params.region);
+    }
+
+    if (params.services?.storage) {
+      console.log(`[ProvisionProject] Registering with storage service...`);
+      services.storage = await registerStorageService(params.project_id, params.region);
+    }
+
+    // Step 6: Generate API keys
+    const apiKeyCount = params.api_keys?.count || 1;
+    const apiKeyPrefix = params.api_keys?.prefix;
+    const apiKeys = await generateApiKeys(params.project_id, apiKeyCount, apiKeyPrefix);
+
+    // Step 7: Compile metadata
     const metadata: ProvisionProjectMetadata = {
       projectId: params.project_id,
       database: {
-        host: 'localhost',
-        port: 5432,
-        database_name: `tenant_${params.project_id}`,
-        schema_name: params.project_id,
+        ...databaseInfo,
+        ...schemaInfo,
       },
-      services: {
-        auth: params.services?.auth
-          ? {
-              enabled: true,
-              tenant_id: params.project_id,
-              endpoint: `https://auth.example.com/${params.project_id}`,
-            }
-          : undefined,
-        realtime: params.services?.realtime
-          ? {
-              enabled: true,
-              tenant_id: params.project_id,
-              endpoint: `wss://realtime.example.com/${params.project_id}`,
-            }
-          : undefined,
-        storage: params.services?.storage
-          ? {
-              enabled: true,
-              tenant_id: params.project_id,
-              endpoint: `https://storage.example.com/${params.project_id}`,
-              bucket_name: `bucket-${params.project_id}`,
-            }
-          : undefined,
-      },
-      api_keys: [
-        {
-          key_id: `key-${params.project_id}-1`,
-          key_prefix: params.api_keys?.prefix || params.project_id,
-          created_at: new Date(),
-        },
-      ],
+      services,
+      api_keys: apiKeys.map((key) => ({
+        key_id: key.key_id,
+        key_prefix: key.key_prefix,
+        created_at: key.created_at,
+      })),
       metadata: {
         provisioned_at: new Date(),
         region: params.region,
@@ -326,7 +202,7 @@ export async function provisionProjectHandler(
 
     return {
       success: false,
-      error: errorMessage,
+      error: 'Failed to provision project',
     };
   }
 }
