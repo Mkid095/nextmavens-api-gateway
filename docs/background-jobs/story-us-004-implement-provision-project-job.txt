@@ -1,0 +1,46 @@
+---
+memoryVersion: 1
+storyId: US-004
+storyTitle: Implement Provision Project Job
+completedDate: 2026-01-29
+---
+
+STORY: US-004 - Implement Provision Project Job
+========================
+
+DESCRIPTION:
+As a platform operator, I want project provisioning to run as a background job so that failures can be retried automatically.
+
+MAVEN STEPS COMPLETED: [1, 2, 7, 10]
+
+IMPLEMENTATION SUMMARY:
+Created a comprehensive provision_project job handler that creates tenant databases and schemas, registers with auth/realtime/storage services, generates SHA-256 hashed API keys, and includes retry logic with max 3 attempts.
+
+KEY FILES:
+- api-gateway/src/lib/jobs/handlers/provision-project.handler.ts - Main handler (264 lines)
+- api-gateway/src/lib/jobs/handlers/provision-project/types.ts - Types and validation
+- api-gateway/src/lib/jobs/handlers/provision-project/database.ts - DB operations
+- api-gateway/src/lib/jobs/handlers/provision-project/services.ts - Service registration
+- api-gateway/src/lib/jobs/handlers/provision-project/api-keys.ts - API key generation
+- api-gateway/src/lib/jobs/handlers/provision-project/config.ts - Configuration
+
+DECISIONS MADE:
+- SHA-256 hashing for API keys before storage
+- HTTP-based service registration with timeout handling
+- PostgreSQL format() with %I for SQL injection prevention
+- Comprehensive input validation with regex patterns
+- Generic error messages to prevent information leakage
+
+INTEGRATION POINTS:
+- Registered in jobs-worker.ts with JobType.PROVISION_PROJECT
+- Exported from jobs/index.ts for external use
+- Uses control_plane.jobs table (US-001)
+- Works with job queue system (US-002)
+- Executed by job worker (US-003)
+
+LESSONS LEARNED:
+- Use format() with %I for safe identifier escaping in PostgreSQL
+- Hash sensitive data (API keys) before storage
+- Timeout protection needed for external HTTP calls
+- Type safety catches many bugs at compile time
+- Worker retry logic provides 5-minute interval between attempts
