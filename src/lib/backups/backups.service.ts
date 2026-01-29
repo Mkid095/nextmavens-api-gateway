@@ -19,10 +19,15 @@ import type {
 } from '@nextmavens/audit-logs-database';
 
 /**
- * Extended Backup interface with restore_count
+ * Extended Backup interface with restore_count and retention fields
  */
-export interface Backup extends BaseBackup {
+export interface Backup extends Omit<BaseBackup, 'restore_count'> {
   restore_count: number;
+  message_id?: number;
+  notified_at?: Date;
+  cleanup_status?: 'pending' | 'notified' | 'deleted' | 'failed';
+  cleanup_attempts?: number;
+  cleanup_error?: string;
 }
 
 /**
@@ -73,10 +78,15 @@ function rowToBackup(row: Record<string, unknown>): Backup {
     project_id: row.project_id as string,
     type: row.type as BackupType,
     file_id: row.file_id as string,
+    message_id: row.message_id as number | undefined,
     size: row.size as number,
     created_at: row.created_at as Date,
     expires_at: row.expires_at as Date,
     restore_count: (row.restore_count as number) || 0,
+    notified_at: row.notified_at as Date | undefined,
+    cleanup_status: row.cleanup_status as 'pending' | 'notified' | 'deleted' | 'failed' | undefined,
+    cleanup_attempts: (row.cleanup_attempts as number) || 0,
+    cleanup_error: row.cleanup_error as string | undefined,
   };
 }
 
@@ -197,6 +207,7 @@ function validateDateRange(date: Date, fieldName: string): void {
  *   project_id: 'proj-123',
  *   type: BackupType.DATABASE,
  *   file_id: 'telegram-file-123',
+ *   message_id: 12345,
  *   size: 1024000,
  * });
  * ```
@@ -212,6 +223,13 @@ export async function createBackup(input: CreateBackupInput): Promise<Backup> {
     validateDateRange(input.expires_at, 'expires_at');
   }
 
+  // Validate message_id if provided
+  if (input.message_id !== undefined) {
+    if (!Number.isInteger(input.message_id) || input.message_id <= 0) {
+      throw new BackupError('Message ID must be a positive integer', 'INVALID_MESSAGE_ID');
+    }
+  }
+
   // Generate a unique backup ID
   const id = uuidv4();
 
@@ -220,21 +238,23 @@ export async function createBackup(input: CreateBackupInput): Promise<Backup> {
     ? input.expires_at
     : new Date(Date.now() + VALIDATION.DEFAULT_EXPIRATION_MS);
 
-  // Insert backup record
+  // Insert backup record with message_id if provided
   const queryText = `
     INSERT INTO control_plane.backups (
       id,
       project_id,
       type,
       file_id,
+      message_id,
       size,
       expires_at
-    ) VALUES ($1, $2, $3, $4, $5, $6)
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7)
     RETURNING
       id,
       project_id,
       type,
       file_id,
+      message_id,
       size,
       created_at,
       expires_at,
@@ -246,6 +266,7 @@ export async function createBackup(input: CreateBackupInput): Promise<Backup> {
     input.project_id,
     input.type,
     input.file_id,
+    input.message_id || null,
     input.size,
     expiresAt,
   ];
@@ -428,10 +449,15 @@ export async function getBackupById(id: string): Promise<Backup | null> {
       project_id,
       type,
       file_id,
+      message_id,
       size,
       created_at,
       expires_at,
-      restore_count
+      restore_count,
+      notified_at,
+      cleanup_status,
+      cleanup_attempts,
+      cleanup_error
     FROM control_plane.backups
     WHERE id = $1
   `;
@@ -454,10 +480,15 @@ export async function getBackupById(id: string): Promise<Backup | null> {
       project_id: row.project_id,
       type: row.type as BackupType,
       file_id: row.file_id,
+      message_id: row.message_id as number | undefined,
       size: row.size,
       created_at: row.created_at,
       expires_at: row.expires_at,
       restore_count: row.restore_count,
+      notified_at: row.notified_at as Date | undefined,
+      cleanup_status: row.cleanup_status as 'pending' | 'notified' | 'deleted' | 'failed' | undefined,
+      cleanup_attempts: (row.cleanup_attempts as number) || 0,
+      cleanup_error: row.cleanup_error as string | undefined,
     };
   } catch (error) {
     console.error('Failed to get backup by ID:', error);

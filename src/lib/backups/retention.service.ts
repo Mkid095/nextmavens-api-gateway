@@ -125,7 +125,7 @@ function validateRetentionConfig(config: RetentionConfig): void {
  *
  * A backup is eligible for cleanup if:
  * - It has expired (expires_at < NOW())
- * - OR it was notified and notification period has passed
+ * - Cleanup status is not already 'deleted'
  *
  * @param projectId - Optional project ID filter
  * @param type - Optional backup type filter
@@ -137,7 +137,10 @@ export async function getEligibleBackups(
   type?: BackupType,
   batchSize: number = 100
 ): Promise<EligibleBackup[]> {
-  const conditions: string[] = ['expires_at < NOW()'];
+  const conditions: string[] = [
+    'expires_at < NOW()',
+    '(cleanup_status IS NULL OR cleanup_status != \'deleted\')'
+  ];
   const values: unknown[] = [];
   let paramIndex = 1;
 
@@ -159,9 +162,10 @@ export async function getEligibleBackups(
       project_id,
       type,
       file_id,
+      message_id,
       expires_at,
       EXTRACT(DAY FROM (NOW() - expires_at)) as days_until_expiration,
-      false as notified
+      notified_at IS NOT NULL as notified
     FROM control_plane.backups
     WHERE ${whereClause}
     ORDER BY expires_at ASC
@@ -180,6 +184,7 @@ export async function getEligibleBackups(
         project_id: row.project_id as string,
         type: row.type as BackupType,
         file_id: row.file_id as string,
+        message_id: row.message_id as number | undefined,
         expires_at: row.expires_at as Date,
         days_until_expiration: -(parseInt(typeof daysExp === 'string' ? daysExp : '0', 10)),
         notified: row.notified as boolean,
@@ -196,7 +201,7 @@ export async function getEligibleBackups(
  *
  * A backup needs notification if:
  * - It will expire within the notification window
- * - User has not been notified yet
+ * - User has not been notified yet (notified_at IS NULL)
  *
  * @param projectId - Optional project ID filter
  * @param type - Optional backup type filter
@@ -214,7 +219,8 @@ export async function getBackupsNeedingNotification(
 
   const conditions: string[] = [
     'expires_at <= $1',
-    'expires_at > NOW()'
+    'expires_at > NOW()',
+    'notified_at IS NULL'
   ];
   const values: unknown[] = [notificationThreshold];
   let paramIndex = 2;
@@ -237,6 +243,7 @@ export async function getBackupsNeedingNotification(
       project_id,
       type,
       file_id,
+      message_id,
       size,
       created_at,
       expires_at,
@@ -271,43 +278,63 @@ export async function getBackupsNeedingNotification(
 /**
  * Mark backup as notified
  *
- * NOTE: This is a stub implementation. The actual implementation requires
- * adding a `notified_at` column to the backups table in a future migration.
+ * Sets notified_at timestamp and updates cleanup_status to 'notified'.
  *
  * @param backupId - Backup ID
  * @returns True if marked successfully, false if not found
  */
 export async function markBackupNotified(backupId: string): Promise<boolean> {
-  // TODO: Implement actual notification tracking
-  // This requires adding a `notified_at` column to the backups table:
-  // ALTER TABLE control_plane.backups ADD COLUMN notified_at TIMESTAMPTZ;
-  //
-  // For now, this is a no-op stub that allows the notification flow to work
-  console.log(`[STUB] Would mark backup ${backupId} as notified`);
-  return true;
+  const queryText = `
+    UPDATE control_plane.backups
+    SET
+      notified_at = NOW(),
+      cleanup_status = 'notified'
+    WHERE id = $1
+    RETURNING id
+  `;
+
+  try {
+    const result = await query(queryText, [backupId]);
+    return result.rows.length > 0;
+  } catch (error) {
+    console.error('Failed to mark backup as notified:', error);
+    throw new RetentionError('Failed to mark backup as notified', 'DATABASE_ERROR');
+  }
 }
 
 /**
- * Delete backup from Telegram (stub implementation)
+ * Delete backup from Telegram
  *
- * NOTE: This is a stub implementation. The actual Telegram API deletion
- * will be implemented in a later step. For now, it returns success to
- * allow the cleanup flow to work.
+ * NOTE: This function requires integration with the telegram-service.
+ * For now, it logs the deletion and returns success to allow cleanup to proceed.
  *
- * @param fileId - Telegram file ID
+ * In production, this should:
+ * 1. Call telegram-service API to delete the message
+ * 2. Pass the message_id from the backup record
+ * 3. Handle API errors and retries
+ *
+ * @param fileId - Telegram file ID (for logging)
+ * @param messageId - Telegram message ID (for deletion)
  * @returns Promise resolving to success status
  */
-export async function deleteBackupFromTelegram(fileId: string): Promise<boolean> {
-  // TODO: Implement actual Telegram deleteMessage API call
-  // This requires:
-  // 1. Storing the message_id when sending the backup (not currently done)
-  // 2. Calling TelegramBot.deleteMessage(chatId, messageId)
-  // 3. Handling errors and retries
+export async function deleteBackupFromTelegram(
+  fileId: string,
+  messageId?: number
+): Promise<boolean> {
+  // If no message_id, we can't delete from Telegram
+  // This can happen for old backups created before message_id tracking
+  if (!messageId) {
+    console.warn(`[Retention] No message_id for file ${fileId}, skipping Telegram deletion`);
+    return true; // Don't fail cleanup, just skip Telegram deletion
+  }
 
-  console.log(`[STUB] Would delete Telegram file: ${fileId}`);
+  // TODO: Integrate with telegram-service to delete the message
+  // For now, log and return success to allow database cleanup to proceed
+  console.log(`[Retention] Would delete Telegram message ${messageId} for file ${fileId}`);
+  console.log(`[Retention] TODO: Integrate with telegram-service API to delete message`);
 
-  // For now, return success to allow cleanup to proceed
-  // In production, this will be replaced with actual Telegram API call
+  // Return success to allow database cleanup to continue
+  // In production, this would make an API call to telegram-service
   return true;
 }
 
@@ -315,6 +342,7 @@ export async function deleteBackupFromTelegram(fileId: string): Promise<boolean>
  * Clean up a single backup
  *
  * Deletes from both database and Telegram with error handling.
+ * Updates cleanup_status to track the cleanup lifecycle.
  *
  * @param backup - Backup to clean up
  * @returns Promise resolving to success status and error message if failed
@@ -323,17 +351,31 @@ export async function cleanupBackup(
   backup: EligibleBackup
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    // Step 1: Delete from Telegram (if file_id exists)
-    if (backup.file_id) {
-      const telegramDeleted = await deleteBackupFromTelegram(backup.file_id);
+    // Step 1: Update cleanup status to 'cleaning_up'
+    await query(
+      `UPDATE control_plane.backups SET cleanup_status = 'cleaning_up', cleanup_attempts = cleanup_attempts + 1 WHERE id = $1`,
+      [backup.id]
+    );
+
+    // Step 2: Delete from Telegram (if message_id exists)
+    if (backup.message_id) {
+      const telegramDeleted = await deleteBackupFromTelegram(backup.file_id, backup.message_id);
       if (!telegramDeleted) {
-        console.warn(`Failed to delete backup ${backup.id} from Telegram, continuing with DB deletion`);
+        console.warn(`[Retention] Failed to delete backup ${backup.id} from Telegram, continuing with DB deletion`);
+        // Don't fail - continue with DB deletion
       }
+    } else {
+      console.log(`[Retention] No message_id for backup ${backup.id}, skipping Telegram deletion`);
     }
 
-    // Step 2: Delete from database
+    // Step 3: Delete from database
     const dbDeleted = await deleteBackupFromDb(backup.id);
     if (!dbDeleted) {
+      // Update cleanup status to 'failed'
+      await query(
+        `UPDATE control_plane.backups SET cleanup_status = 'failed', cleanup_error = $1 WHERE id = $2`,
+        ['Backup not found in database or already deleted', backup.id]
+      );
       return {
         success: false,
         error: 'Backup not found in database or already deleted',
@@ -343,7 +385,18 @@ export async function cleanupBackup(
     return { success: true };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    console.error(`Failed to cleanup backup ${backup.id}:`, errorMessage);
+    console.error(`[Retention] Failed to cleanup backup ${backup.id}:`, errorMessage);
+
+    // Update cleanup status to 'failed' with error message
+    try {
+      await query(
+        `UPDATE control_plane.backups SET cleanup_status = 'failed', cleanup_error = $1 WHERE id = $2`,
+        [errorMessage, backup.id]
+      );
+    } catch (updateError) {
+      console.error(`[Retention] Failed to update cleanup status for ${backup.id}:`, updateError);
+    }
+
     return {
       success: false,
       error: errorMessage,
@@ -526,6 +579,7 @@ export async function getRetentionStats(projectId?: string): Promise<{
   expiring_soon: number;
   pending_notification: number;
   pending_cleanup: number;
+  failed_cleanup: number;
   total_size_bytes: number;
 }> {
   const conditions: string[] = [];
@@ -544,7 +598,8 @@ export async function getRetentionStats(projectId?: string): Promise<{
       COUNT(*) as total_backups,
       COUNT(*) FILTER (WHERE expires_at <= NOW() + INTERVAL '7 days' AND expires_at > NOW()) as expiring_soon,
       COUNT(*) FILTER (WHERE notified_at IS NULL AND expires_at <= NOW() + INTERVAL '7 days') as pending_notification,
-      COUNT(*) FILTER (WHERE expires_at < NOW()) as pending_cleanup,
+      COUNT(*) FILTER (WHERE expires_at < NOW() AND (cleanup_status IS NULL OR cleanup_status != 'deleted')) as pending_cleanup,
+      COUNT(*) FILTER (WHERE cleanup_status = 'failed') as failed_cleanup,
       COALESCE(SUM(size), 0) as total_size_bytes
     FROM control_plane.backups
     ${whereClause}
@@ -559,6 +614,7 @@ export async function getRetentionStats(projectId?: string): Promise<{
       expiring_soon: parseInt(row.expiring_soon || '0', 10),
       pending_notification: parseInt(row.pending_notification || '0', 10),
       pending_cleanup: parseInt(row.pending_cleanup || '0', 10),
+      failed_cleanup: parseInt(row.failed_cleanup || '0', 10),
       total_size_bytes: parseInt(row.total_size_bytes || '0', 10),
     };
   } catch (error) {

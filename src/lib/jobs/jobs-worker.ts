@@ -24,8 +24,10 @@ import { rotateKeyHandler } from './handlers/rotate-key.handler.js';
 import { exportBackupHandler } from './handlers/export-backup.handler.js';
 import { exportLogsHandler } from './handlers/export-logs.handler.js';
 import { autoSuspendHandler } from './handlers/auto-suspend.handler.js';
+import { cleanupExpiredBackupsHandler, notifyBackupExpirationHandler } from './handlers/cleanup-backups.handler.js';
 import { enqueueJob } from './queue.js';
 import { JobType } from '@nextmavens/audit-logs-database';
+import { getConfig as getRetentionConfig } from '../backups/retention.config.js';
 
 /**
  * Scheduled job interface
@@ -60,6 +62,10 @@ export function getJobsWorker(): JobWorker {
   worker.registerHandler(JobType.EXPORT_BACKUP, exportBackupHandler);
   worker.registerHandler('export_logs', exportLogsHandler);
   worker.registerHandler(JobType.AUTO_SUSPEND, autoSuspendHandler);
+
+  // US-010: Register backup retention cleanup handlers
+  worker.registerHandler('cleanup_expired_backups', cleanupExpiredBackupsHandler);
+  worker.registerHandler('notify_backup_expiration', notifyBackupExpirationHandler);
 
   return worker;
 }
@@ -103,6 +109,8 @@ export async function initializeJobsWorker(): Promise<void> {
  *
  * Configures recurring jobs like:
  * - Hourly usage limits check
+ * - Daily backup cleanup (US-010)
+ * - Daily backup expiration notifications (US-010)
  */
 function setupScheduledJobs(): void {
   // Schedule hourly usage limits check
@@ -116,8 +124,35 @@ function setupScheduledJobs(): void {
     },
   });
 
+  // US-010: Schedule daily backup cleanup
+  const retentionConfig = getRetentionConfig();
+  const cleanupInterval = retentionConfig.cleanupIntervalHours * 60 * 60 * 1000;
+
+  scheduleJob({
+    name: 'backup-cleanup',
+    jobType: 'cleanup_expired_backups',
+    intervalMs: cleanupInterval,
+    payload: {
+      batch_size: retentionConfig.cleanupBatchSize,
+      notify_first: false, // Notifications are sent separately
+      dry_run: false,
+    },
+  });
+
+  // US-010: Schedule daily backup expiration notifications
+  scheduleJob({
+    name: 'backup-expiration-notify',
+    jobType: 'notify_backup_expiration',
+    intervalMs: 24 * 60 * 60 * 1000, // Daily
+    payload: {
+      batch_size: retentionConfig.cleanupBatchSize,
+    },
+  });
+
   console.log('[JobsWorker] Scheduled jobs configured:');
   console.log('  - check_usage_limits: Every hour');
+  console.log(`  - cleanup_expired_backups: Every ${retentionConfig.cleanupIntervalHours} hour(s)`);
+  console.log('  - notify_backup_expiration: Daily');
 }
 
 /**

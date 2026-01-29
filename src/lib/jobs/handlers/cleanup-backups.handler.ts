@@ -30,11 +30,10 @@
  * ```
  */
 
+import type { JobExecutionResult, JobPayload } from '@nextmavens/audit-logs-database';
 import type {
   RetentionCleanupPayload,
   NotificationPayload,
-  CleanupResult,
-  NotificationResult,
 } from '../../backups/retention.types.js';
 import {
   cleanupExpiredBackups,
@@ -70,10 +69,9 @@ import {
  * });
  * ```
  */
-export const cleanupExpiredBackupsHandler = {
-  type: 'cleanup_expired_backups',
-
-  async handle(payload: Record<string, unknown>): Promise<CleanupResult> {
+export async function cleanupExpiredBackupsHandler(
+  payload: JobPayload
+): Promise<JobExecutionResult> {
     console.log('[Job] Starting cleanup_expired_backups job');
     console.log('[Job] Payload:', JSON.stringify(payload, null, 2));
 
@@ -91,18 +89,26 @@ export const cleanupExpiredBackupsHandler = {
         console.log(`[Job] Cleanup summary: ${result.successful} successful, ${result.failed} failed, ${result.skipped} skipped in ${result.duration_ms}ms`);
       }
 
-      return result;
+      return {
+        success: true,
+        data: result as unknown as Record<string, unknown>,
+      };
     } catch (error) {
       console.error('[Job] Cleanup job failed:', error);
 
       if (error instanceof RetentionError) {
-        throw error;
+        return {
+          success: false,
+          error: error.message,
+        };
       }
 
-      throw new Error(`Cleanup job failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      return {
+        success: false,
+        error: `Cleanup job failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      };
     }
-  },
-};
+}
 
 /**
  * Notify Backup Expiration Job Handler
@@ -128,10 +134,9 @@ export const cleanupExpiredBackupsHandler = {
  * });
  * ```
  */
-export const notifyBackupExpirationHandler = {
-  type: 'notify_backup_expiration',
-
-  async handle(payload: Record<string, unknown>): Promise<NotificationResult> {
+export async function notifyBackupExpirationHandler(
+  payload: JobPayload
+): Promise<JobExecutionResult> {
     console.log('[Job] Starting notify_backup_expiration job');
     console.log('[Job] Payload:', JSON.stringify(payload, null, 2));
 
@@ -149,18 +154,26 @@ export const notifyBackupExpirationHandler = {
         console.log(`[Job] Notification summary: ${result.successful} successful, ${result.failed} failed`);
       }
 
-      return result;
+      return {
+        success: true,
+        data: result as unknown as Record<string, unknown>,
+      };
     } catch (error) {
       console.error('[Job] Notification job failed:', error);
 
       if (error instanceof RetentionError) {
-        throw error;
+        return {
+          success: false,
+          error: error.message,
+        };
       }
 
-      throw new Error(`Notification job failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      return {
+        success: false,
+        error: `Notification job failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      };
     }
-  },
-};
+}
 
 /**
  * Validate cleanup job payload

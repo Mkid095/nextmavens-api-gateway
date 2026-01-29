@@ -136,6 +136,8 @@ export interface EligibleBackup {
   type: BackupType;
   /** Telegram file ID (if applicable) */
   file_id: string;
+  /** Telegram message ID (for deletion) */
+  message_id?: number;
   /** Expiration timestamp */
   expires_at: Date;
   /** Days until expiration (negative = already expired) */
