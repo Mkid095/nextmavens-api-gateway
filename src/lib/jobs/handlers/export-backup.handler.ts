@@ -32,6 +32,7 @@ import { createWriteStream } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { createGzip } from 'zlib';
+import { enqueueJob } from '../queue.js';
 
 /**
  * Export backup handler payload
@@ -406,8 +407,6 @@ export async function enqueueExportBackupJob(
   projectId: string,
   options?: Partial<Omit<ExportBackupPayload, 'project_id'>>
 ): Promise<string> {
-  const { enqueueJob } = await import('@/lib/jobs/queue.js');
-
   const payload: ExportBackupPayload = {
     project_id: projectId,
     ...options,

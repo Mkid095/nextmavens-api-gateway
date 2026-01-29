@@ -67,3 +67,21 @@ export {
 // Export individual job handlers for registration with workers
 
 export { rotateKeyHandler } from './handlers/rotate-key.handler.js';
+export { checkUsageLimitsHandler } from './handlers/check-usage-limits.handler.js';
+export { exportBackupHandler } from './handlers/export-backup.handler.js';
+export { autoSuspendHandler } from './handlers/auto-suspend.handler.js';
+
+// ============================================================================
+// JOB WORKER INITIALIZATION
+// ============================================================================
+// US-008: Implement Check Usage Limits Job - Step 7: Integration
+//
+// Centralized worker initialization with all handlers registered
+// and scheduled jobs configured
+
+export {
+  getJobsWorker,
+  initializeJobsWorker,
+  shutdownJobsWorker,
+  getScheduledJobs,
+} from './jobs-worker.js';

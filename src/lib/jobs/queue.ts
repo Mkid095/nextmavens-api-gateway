@@ -66,6 +66,117 @@ export interface EnqueueJobOptions {
 }
 
 /**
+ * Validation constants
+ */
+const VALIDATION = {
+  /** Maximum allowed maxAttempts value */
+  MAX_MAX_ATTEMPTS: 100,
+  /** Minimum allowed maxAttempts value */
+  MIN_MAX_ATTEMPTS: 1,
+  /** Maximum allowed delay in milliseconds (24 hours) */
+  MAX_DELAY: 24 * 60 * 60 * 1000,
+  /** Minimum allowed delay (0 = immediate) */
+  MIN_DELAY: 0,
+  /** Maximum allowed priority value */
+  MAX_PRIORITY: 1000,
+  /** Minimum allowed priority value */
+  MIN_PRIORITY: 0,
+} as const;
+
+/**
+ * Validate job type string
+ */
+function validateJobType(type: string): void {
+  if (typeof type !== 'string') {
+    throw new Error('Job type must be a string');
+  }
+  if (type.trim().length === 0) {
+    throw new Error('Job type cannot be empty');
+  }
+  if (type.length > 100) {
+    throw new Error('Job type cannot exceed 100 characters');
+  }
+  // Allow only alphanumeric, underscore, and hyphen
+  if (!/^[a-zA-Z0-9_-]+$/.test(type)) {
+    throw new Error('Job type can only contain alphanumeric characters, underscores, and hyphens');
+  }
+}
+
+/**
+ * Validate job payload
+ */
+function validateJobPayload(payload: JobPayload): void {
+  if (typeof payload !== 'object' || payload === null) {
+    throw new Error('Job payload must be an object');
+  }
+  // Check payload size when serialized (max 1MB)
+  const serialized = JSON.stringify(payload);
+  if (serialized.length > 1024 * 1024) {
+    throw new Error('Job payload size cannot exceed 1MB');
+  }
+}
+
+/**
+ * Validate maxAttempts value
+ */
+function validateMaxAttempts(maxAttempts: number): void {
+  if (!Number.isInteger(maxAttempts)) {
+    throw new Error('maxAttempts must be an integer');
+  }
+  if (maxAttempts < VALIDATION.MIN_MAX_ATTEMPTS) {
+    throw new Error(`maxAttempts must be at least ${VALIDATION.MIN_MAX_ATTEMPTS}`);
+  }
+  if (maxAttempts > VALIDATION.MAX_MAX_ATTEMPTS) {
+    throw new Error(`maxAttempts cannot exceed ${VALIDATION.MAX_MAX_ATTEMPTS}`);
+  }
+}
+
+/**
+ * Validate delay value
+ */
+function validateDelay(delay: number): void {
+  if (!Number.isInteger(delay)) {
+    throw new Error('delay must be an integer');
+  }
+  if (delay < VALIDATION.MIN_DELAY) {
+    throw new Error(`delay must be at least ${VALIDATION.MIN_DELAY}`);
+  }
+  if (delay > VALIDATION.MAX_DELAY) {
+    throw new Error(`delay cannot exceed ${VALIDATION.MAX_DELAY} milliseconds (24 hours)`);
+  }
+}
+
+/**
+ * Validate priority value
+ */
+function validatePriority(priority: number): void {
+  if (!Number.isInteger(priority)) {
+    throw new Error('priority must be an integer');
+  }
+  if (priority < VALIDATION.MIN_PRIORITY) {
+    throw new Error(`priority must be at least ${VALIDATION.MIN_PRIORITY}`);
+  }
+  if (priority > VALIDATION.MAX_PRIORITY) {
+    throw new Error(`priority cannot exceed ${VALIDATION.MAX_PRIORITY}`);
+  }
+}
+
+/**
+ * Validate scheduled date
+ */
+function validateScheduledDate(date: Date): void {
+  if (!(date instanceof Date) || isNaN(date.getTime())) {
+    throw new Error('Scheduled date must be a valid Date object');
+  }
+  // Don't allow scheduling too far in the future (max 1 year)
+  const maxFuture = new Date();
+  maxFuture.setFullYear(maxFuture.getFullYear() + 1);
+  if (date > maxFuture) {
+    throw new Error('Cannot schedule jobs more than 1 year in the future');
+  }
+}
+
+/**
  * Result of job enqueuement
  */
 export interface EnqueueJobResult {
@@ -136,15 +247,31 @@ export class JobQueue {
     payload: JobPayload = {},
     options: EnqueueJobOptions = {}
   ): Promise<EnqueueJobResult> {
-    // Generate unique job ID
-    const id = uuidv4();
+    // Validate inputs
+    validateJobType(type);
+    validateJobPayload(payload);
 
     // Calculate scheduled timestamp
     const scheduledAt = options.scheduledAt || new Date(Date.now() + (options.delay || 0));
 
-    // Set defaults
+    // Validate scheduled date
+    if (options.scheduledAt) {
+      validateScheduledDate(options.scheduledAt);
+    }
+
+    // Set defaults and validate
     const maxAttempts = options.maxAttempts ?? 3;
     const priority = options.priority ?? 0;
+
+    validateMaxAttempts(maxAttempts);
+    validatePriority(priority);
+
+    if (options.delay !== undefined) {
+      validateDelay(options.delay);
+    }
+
+    // Generate unique job ID
+    const id = uuidv4();
 
     // Prepare payload with priority
     const enrichedPayload: JobPayload = {
@@ -182,7 +309,7 @@ export class JobQueue {
       const result = await query(queryText, values);
 
       if (result.rows.length === 0) {
-        throw new Error('Failed to insert job into database');
+        throw new Error('Failed to create job');
       }
 
       const row = result.rows[0] as {
@@ -201,8 +328,11 @@ export class JobQueue {
         createdAt: row.created_at,
       };
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      throw new Error(`Failed to enqueue job: ${message}`);
+      // Don't expose internal error messages
+      if (error instanceof Error && error.message.startsWith('Failed to create job')) {
+        throw error;
+      }
+      throw new Error('Failed to enqueue job');
     }
   }
 

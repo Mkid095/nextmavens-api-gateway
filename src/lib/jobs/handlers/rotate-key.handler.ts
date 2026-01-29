@@ -26,7 +26,7 @@
 import type { JobExecutionResult, JobPayload } from '@nextmavens/audit-logs-database';
 import { query } from '@nextmavens/audit-logs-database';
 import { v4 as uuidv4 } from 'uuid';
-import { enqueueJob } from '@/lib/jobs/queue.js';
+import { enqueueJob } from '../queue.js';
 
 /**
  * Rotate key handler payload

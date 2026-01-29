@@ -17,8 +17,8 @@
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from '@jest/globals';
 import { query } from '@nextmavens/audit-logs-database';
-import { JobWorker } from '../worker.js';
-import { enqueueJob } from '../queue.js';
+import { JobWorker } from '../worker';
+import { enqueueJob } from '../queue';
 import { JobStatus, type JobHandler, type JobPayload } from '@nextmavens/audit-logs-database';
 
 /**
@@ -275,7 +275,7 @@ describe('US-003: Job Worker Integration Tests', () => {
       ]);
 
       // Wait for all jobs to complete
-      await Promise.all(jobs.map((job) => waitForJob(job.id)));
+      await Promise.all(jobs.map((job: { id: string }) => waitForJob(job.id)));
 
       // Verify all jobs completed
       for (const jobResult of jobs) {

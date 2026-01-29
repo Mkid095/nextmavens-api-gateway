@@ -25,7 +25,9 @@ import { requestLoggerMiddleware } from '@/api/middleware/request-logger.middlew
 import { durationTrackingMiddleware } from '@/duration/index.js';
 import { createHealthCheckService, getHealthCheckService } from '@/health/index.js';
 import { configureAuditRoutes } from '@/api/routes/audit/index.js';
+import { configureJobRoutes } from '@/api/routes/jobs/index.js';
 import { initializeAuditLogs, auditLogsHealthCheck, shutdownAuditLogs } from '@nextmavens/audit-logs-database';
+import { initializeJobsWorker, shutdownJobsWorker } from '@/lib/jobs/index.js';
 
 const app = express();
 const GATEWAY_PORT = parseInt(process.env.GATEWAY_PORT || '8080', 10);
@@ -163,6 +165,14 @@ app.get('/health/snapshot', checkSnapshotHealth);
 // Configure audit log routes
 // All audit endpoints require JWT authentication
 configureAuditRoutes(app);
+
+// ============================================================================
+// Job Status Endpoints (US-010)
+// ============================================================================
+
+// Configure job status routes
+// All job endpoints require JWT authentication
+configureJobRoutes(app);
 
 // Gateway info endpoint
 app.get('/', (_req, res) => {
@@ -508,6 +518,18 @@ async function start(): Promise<void> {
       // The gateway can still function, but audit queries will fail
     }
 
+    // Initialize jobs worker
+    console.log('[Gateway] Initializing jobs worker...');
+    try {
+      await initializeJobsWorker();
+      console.log('[Gateway] Jobs worker initialized successfully');
+    } catch (error) {
+      console.error('[Gateway] Failed to initialize jobs worker:', error);
+      console.warn('[Gateway] Background jobs will not be processed');
+      // Don't fail the gateway startup if jobs worker initialization fails
+      // The gateway can still function, but background jobs won't run
+    }
+
     // Start HTTP server
     app.listen(GATEWAY_PORT, () => {
       console.log(`
@@ -529,6 +551,7 @@ async function start(): Promise<void> {
 ║  ✓ Rate limiting enforcement                              ║
 ║  ✓ Centralized error handling                             ║
 ║  ✓ Audit logs database integration                        ║
+║  ✓ Background jobs worker with scheduled tasks            ║
 ╠══════════════════════════════════════════════════════════════╣
 ║  Public Endpoints:                                         ║
 ║  GET  /health          - Enhanced health check with deps   ║
@@ -563,6 +586,14 @@ process.on('SIGTERM', async () => {
     snapshotService.stop();
   }
 
+  // Shutdown jobs worker
+  try {
+    await shutdownJobsWorker();
+    console.log('[Gateway] Jobs worker shut down successfully');
+  } catch (error) {
+    console.error('[Gateway] Error shutting down jobs worker:', error);
+  }
+
   // Shutdown audit logs database
   try {
     await shutdownAuditLogs();
@@ -579,6 +610,14 @@ process.on('SIGINT', async () => {
   const snapshotService = getSnapshotService();
   if (snapshotService) {
     snapshotService.stop();
+  }
+
+  // Shutdown jobs worker
+  try {
+    await shutdownJobsWorker();
+    console.log('[Gateway] Jobs worker shut down successfully');
+  } catch (error) {
+    console.error('[Gateway] Error shutting down jobs worker:', error);
   }
 
   // Shutdown audit logs database
