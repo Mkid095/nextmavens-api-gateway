@@ -66,6 +66,7 @@ export {
 // ============================================================================
 // Export individual job handlers for registration with workers
 
+export { provisionProjectHandler } from './handlers/provision-project.handler.js';
 export { rotateKeyHandler } from './handlers/rotate-key.handler.js';
 export { checkUsageLimitsHandler } from './handlers/check-usage-limits.handler.js';
 export { exportBackupHandler } from './handlers/export-backup.handler.js';

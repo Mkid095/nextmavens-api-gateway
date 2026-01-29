@@ -19,6 +19,7 @@
  */
 
 import { getJobWorker, type JobWorker } from './worker.js';
+import { provisionProjectHandler } from './handlers/provision-project.handler.js';
 import { checkUsageLimitsHandler } from './handlers/check-usage-limits.handler.js';
 import { rotateKeyHandler } from './handlers/rotate-key.handler.js';
 import { exportBackupHandler } from './handlers/export-backup.handler.js';
@@ -57,6 +58,7 @@ export function getJobsWorker(): JobWorker {
   });
 
   // Register all job handlers
+  worker.registerHandler(JobType.PROVISION_PROJECT, provisionProjectHandler);
   worker.registerHandler(JobType.CHECK_USAGE_LIMITS, checkUsageLimitsHandler);
   worker.registerHandler(JobType.ROTATE_KEY, rotateKeyHandler);
   worker.registerHandler(JobType.EXPORT_BACKUP, exportBackupHandler);

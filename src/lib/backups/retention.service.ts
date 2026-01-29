@@ -67,6 +67,40 @@ export class RetentionError extends Error {
 }
 
 /**
+ * Sanitize error messages to prevent information leakage
+ * Removes sensitive data like connection strings, file paths, etc.
+ *
+ * @param error - The error to sanitize
+ * @returns Sanitized error message safe for logging/user display
+ */
+function sanitizeErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    let message = error.message;
+
+    // Remove common sensitive patterns
+    const sensitivePatterns = [
+      /password[^=]*=[^,)]+/gi,
+      /secret[^=]*=[^,)]+/gi,
+      /token[^=]*=[^,)]+/gi,
+      /api[_-]?key[^=]*=[^,)]+/gi,
+      /connection string[^=]*=[^,)]+/gi,
+      /\/home\/[^\/]+/gi,
+      /\/Users\/[^\/]+/gi,
+      /postgres:\/\/[^@]+@/gi,
+      /mongodb:\/\/[^@]+@/gi,
+    ];
+
+    for (const pattern of sensitivePatterns) {
+      message = message.replace(pattern, '[REDACTED]');
+    }
+
+    return message;
+  }
+
+  return 'Unknown error';
+}
+
+/**
  * Validate retention configuration
  */
 function validateRetentionConfig(config: RetentionConfig): void {
@@ -384,22 +418,22 @@ export async function cleanupBackup(
 
     return { success: true };
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    const errorMessage = sanitizeErrorMessage(error);
     console.error(`[Retention] Failed to cleanup backup ${backup.id}:`, errorMessage);
 
-    // Update cleanup status to 'failed' with error message
+    // Update cleanup status to 'failed' with SANITIZED error message
     try {
       await query(
         `UPDATE control_plane.backups SET cleanup_status = 'failed', cleanup_error = $1 WHERE id = $2`,
         [errorMessage, backup.id]
       );
     } catch (updateError) {
-      console.error(`[Retention] Failed to update cleanup status for ${backup.id}:`, updateError);
+      console.error(`[Retention] Failed to update cleanup status for ${backup.id}:`, sanitizeErrorMessage(updateError));
     }
 
     return {
       success: false,
-      error: errorMessage,
+      error: 'Cleanup operation failed. Please try again later.',
     };
   }
 }
@@ -487,9 +521,9 @@ export async function cleanupExpiredBackups(
 
     return result;
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    const errorMessage = sanitizeErrorMessage(error);
     console.error('[Retention] Cleanup failed:', errorMessage);
-    throw new RetentionError(`Cleanup operation failed: ${errorMessage}`, 'CLEANUP_FAILED');
+    throw new RetentionError('Cleanup operation failed. Please try again later.', 'CLEANUP_FAILED');
   }
 }
 
@@ -533,12 +567,12 @@ export async function sendExpirationNotifications(
         result.successful++;
         console.log(`[Retention] Notified backup ${backup.id}`);
       } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        const errorMessage = sanitizeErrorMessage(error);
         result.failed++;
         result.errors.push({
           backupId: backup.id,
           projectId: backup.project_id,
-          error: errorMessage,
+          error: 'Failed to send notification. Please try again later.',
         });
         console.error(`[Retention] Failed to notify backup ${backup.id}: ${errorMessage}`);
       }
@@ -546,9 +580,9 @@ export async function sendExpirationNotifications(
 
     return result;
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    const errorMessage = sanitizeErrorMessage(error);
     console.error('[Retention] Notification failed:', errorMessage);
-    throw new RetentionError(`Notification operation failed: ${errorMessage}`, 'NOTIFICATION_FAILED');
+    throw new RetentionError('Notification operation failed. Please try again later.', 'NOTIFICATION_FAILED');
   }
 }
 
