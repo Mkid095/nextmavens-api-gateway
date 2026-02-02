@@ -3,7 +3,12 @@ import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { createSnapshotService, getSnapshotService } from '@/snapshot/snapshot.service.js';
-import { checkSnapshotHealth } from '@/snapshot/snapshot.middleware.js';
+import {
+  checkSnapshotHealth,
+  checkSnapshotHealthDetailed,
+  getSnapshotMetrics,
+  addSnapshotHealthHeader
+} from '@/snapshot/snapshot.middleware.js';
 import {
   validateProjectStatus,
   requireActiveProject,
@@ -27,6 +32,8 @@ import { createHealthCheckService, getHealthCheckService } from '@/health/index.
 import { configureAuditRoutes } from '@/api/routes/audit/index.js';
 import { configureJobRoutes } from '@/api/routes/jobs/index.js';
 import { configureBackupRoutes } from '@/api/routes/backup/index.js';
+import { configureBreakGlassRoutes } from '@/api/routes/admin/index.js';
+import { configureMCPRoutes } from '@/api/routes/mcp/index.js';
 import { initializeAuditLogs, auditLogsHealthCheck, shutdownAuditLogs } from '@nextmavens/audit-logs-database';
 import { initializeJobsWorker, shutdownJobsWorker } from '@/lib/jobs/index.js';
 
@@ -156,8 +163,10 @@ app.get('/health', healthCheckLimiter, async (_req, res) => {
   }
 });
 
-// Snapshot health check endpoint
+// Snapshot health check endpoints
 app.get('/health/snapshot', checkSnapshotHealth);
+app.get('/health/snapshot/detailed', checkSnapshotHealthDetailed);
+app.get('/health/snapshot/metrics', getSnapshotMetrics);
 
 // ============================================================================
 // Audit Log Endpoints (US-008)
@@ -182,6 +191,22 @@ configureJobRoutes(app);
 // Configure backup routes
 // All backup endpoints require JWT authentication
 configureBackupRoutes(app);
+
+// ============================================================================
+// Break Glass Authentication Endpoints (US-003)
+// ============================================================================
+
+// Configure break glass authentication routes
+// All break glass endpoints require JWT authentication and 2FA
+configureBreakGlassRoutes(app);
+
+// ============================================================================
+// Model Context Protocol (MCP) Endpoints
+// ============================================================================
+
+// Configure MCP routes for AI assistant integration
+// MCP endpoint does not require JWT auth - uses API key from request
+configureMCPRoutes(app);
 
 // Gateway info endpoint
 app.get('/', (_req, res) => {

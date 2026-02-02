@@ -23,7 +23,10 @@ export {
 
 // Health check middleware
 export {
-  checkSnapshotHealth
+  checkSnapshotHealth,
+  checkSnapshotHealthDetailed,
+  getSnapshotMetrics,
+  addSnapshotHealthHeader
 } from './health.middleware.js';
 
 // Validation helpers

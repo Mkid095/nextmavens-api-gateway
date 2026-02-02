@@ -6,9 +6,13 @@ import { withErrorHandling } from '@/api/middleware/error.handler.js';
 /**
  * JWT payload structure
  * Contains the project_id claim used for request scoping
+ * Can also contain break glass session claims
  */
 export interface JwtPayload {
-  project_id: string;
+  project_id?: string;
+  userId?: string;
+  scope?: 'break_glass';
+  session_id?: string;
   iss?: string;
   sub?: string;
   aud?: string;
@@ -138,21 +142,26 @@ function validateJwtToken(token: string, config: JwtConfig): JwtAuthResult {
     // - Audience validation
     const decoded = jwt.verify(token, config.secret, verifyOptions) as JwtPayload;
 
-    // SECURITY: Validate that project_id claim exists and is a string
+    // SECURITY: Validate that project_id claim exists and is a string (unless it's a break glass token)
     if (!decoded.project_id || typeof decoded.project_id !== 'string') {
-      return {
-        valid: false,
-        error: ApiError.keyInvalid()
-      };
+      // Allow break glass tokens without project_id
+      if (decoded.scope !== 'break_glass') {
+        return {
+          valid: false,
+          error: ApiError.keyInvalid()
+        };
+      }
     }
 
-    // SECURITY: Validate project_id format
-    const projectIdRegex = /^[a-zA-Z0-9_-]{1,100}$/;
-    if (!projectIdRegex.test(decoded.project_id)) {
-      return {
-        valid: false,
-        error: ApiError.keyInvalid()
-      };
+    // SECURITY: Validate project_id format (if present)
+    if (decoded.project_id) {
+      const projectIdRegex = /^[a-zA-Z0-9_-]{1,100}$/;
+      if (!projectIdRegex.test(decoded.project_id)) {
+        return {
+          valid: false,
+          error: ApiError.keyInvalid()
+        };
+      }
     }
 
     return {

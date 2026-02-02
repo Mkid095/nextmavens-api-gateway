@@ -11,16 +11,86 @@ const axios = require('axios');
 const http = require('http');
 require('dotenv').config();
 
+// ============================================================================
+// ENVIRONMENT VARIABLE VALIDATION
+// ============================================================================
+
+/**
+ * Validate required environment variables at startup
+ * Fails fast if required variables are missing
+ */
+function validateEnv() {
+  const required = {
+    DATABASE_URL: 'PostgreSQL connection string',
+    JWT_SECRET: 'JWT secret key for token verification (min 32 chars)',
+  };
+
+  const optional = {
+    GATEWAY_PORT: 'Gateway server port (default: 8080)',
+    REDIS_URL: 'Redis connection string for rate limiting (default: redis://localhost:6379)',
+  };
+
+  const missing = [];
+  const warnings = [];
+
+  for (const [key, description] of Object.entries(required)) {
+    if (!process.env[key]) {
+      missing.push(`  - ${key}: ${description}`);
+    }
+  }
+
+  // Warn about insecure defaults
+  if (process.env.NODE_ENV === 'production') {
+    if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32) {
+      warnings.push('  - JWT_SECRET should be at least 32 characters in production');
+    }
+  }
+
+  if (missing.length > 0) {
+    console.error('[FATAL] Missing required environment variables:\n' + missing.join('\n'));
+    console.error('[FATAL] Please set these environment variables and restart the service.');
+    process.exit(1);
+  }
+
+  if (warnings.length > 0) {
+    console.warn('[WARN] Security warnings:\n' + warnings.join('\n'));
+  }
+
+  // Log configuration
+  console.log('[Config] Environment validation passed');
+  console.log('[Config] NODE_ENV:', process.env.NODE_ENV || 'development');
+}
+
+// Validate on startup
+validateEnv();
+
 const app = express();
 const router = express.Router();
 
-// Configuration
-const GATEWAY_PORT = process.env.GATEWAY_PORT || 8080;
-const JWT_SECRET = process.env.JWT_SECRET || 'nextmavens-gateway-secret';
+// ============================================================================
+// CONFIGURATION
+// ============================================================================
 
-// PostgreSQL connection
+const GATEWAY_PORT = parseInt(process.env.GATEWAY_PORT || '8080', 10);
+const JWT_SECRET = process.env.JWT_SECRET;
+const NODE_ENV = process.env.NODE_ENV || 'development';
+const IS_PRODUCTION = NODE_ENV === 'production';
+
+// SECURITY: In production, require secure JWT secret
+if (IS_PRODUCTION && JWT_SECRET.length < 32) {
+  console.error('[FATAL] JWT_SECRET must be at least 32 characters in production');
+  process.exit(1);
+}
+
+// PostgreSQL connection - NO FALLBACK, only use DATABASE_URL from env
+const DATABASE_URL = process.env.DATABASE_URL;
+
+// Log connection (without exposing credentials)
+const dbUrlSafe = DATABASE_URL?.replace(/:[^:@]+@/, ':****@');
+console.log('[PostgreSQL] Connecting to:', dbUrlSafe || 'DATABASE_URL not set');
+
 const pgPool = new Pool({
-  connectionString: process.env.DATABASE_URL || 'postgresql://nextmavens:Elishiba@95@nextmavens-db-m4sxnf.1.mvuvh68efk7jnvynmv8r2jm2u:5432/nextmavens',
+  connectionString: DATABASE_URL,
   max: 20
 });
 

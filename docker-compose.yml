@@ -2,11 +2,13 @@ services:
   api-gateway:
     build: .
     container_name: nextmavens-api-gateway
+    env_file:
+      - .env
     environment:
-      - GATEWAY_PORT=8080
-      - DATABASE_URL=postgresql://nextmavens:Elishiba@95@nextmavens-db-m4sxnf.1.mvuvh68efk7jnvynmv8r2jm2u:5432/nextmavens
-      - REDIS_URL=redis://dokploy-redis.1.ks3fo0zmfke2ukrda88lf6jb0:6379
-      - JWT_SECRET=nextmavens-gateway-secret-key-2024
+      - GATEWAY_PORT=${GATEWAY_PORT:-8080}
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL:-redis://dokploy-redis:6379}
+      - JWT_SECRET=${JWT_SECRET}
     ports:
       - "8080:8080"
     restart: unless-stopped
